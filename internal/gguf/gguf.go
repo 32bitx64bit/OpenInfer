@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strings"
 )
 
 const (
@@ -40,6 +41,8 @@ type Metadata struct {
 	ChatTemplate  string         `json:"chat_template,omitempty"`
 	Tokenizer     string         `json:"tokenizer,omitempty"`
 	Multimodal    bool           `json:"multimodal"`
+	HasVision     bool           `json:"has_vision"`
+	HasAudio      bool           `json:"has_audio"`
 	Projector     bool           `json:"projector"` // looks like an mmproj file
 	Raw           map[string]any `json:"-"`         // full kv for future use, not serialized to UI
 }
@@ -345,24 +348,41 @@ func (md *Metadata) extract() {
 			md.Tokenizer = s
 		}
 	}
-	// Multimodal indicators.
+	// Multimodal indicators (vision / audio encoders live in mmproj or fused GGUF).
 	for k := range md.Raw {
+		lk := strings.ToLower(k)
 		switch k {
 		case "clip.vision.patch_size", "clip.has_vision_encoder",
-			"gemma3.mm.scale_emb", "audio.block_count":
+			"gemma3.mm.scale_emb":
+			md.HasVision = true
 			md.Multimodal = true
+		case "clip.has_audio_encoder", "audio.block_count":
+			md.HasAudio = true
+			md.Multimodal = true
+		default:
+			if strings.HasPrefix(lk, "clip.vision.") || strings.HasPrefix(lk, "gemma3.mm.") {
+				md.HasVision = true
+				md.Multimodal = true
+			}
+			if strings.HasPrefix(lk, "clip.audio.") || strings.HasPrefix(lk, "audio.") {
+				md.HasAudio = true
+				md.Multimodal = true
+			}
 		}
 	}
 	if _, ok := md.Raw["clip.has_vision_encoder"]; ok {
+		md.HasVision = true
+		md.Multimodal = true
 		if md.Architecture == "clip" || md.Name == "" {
 			md.Projector = md.Architecture == "clip"
 		}
 	}
+	if _, ok := md.Raw["clip.has_audio_encoder"]; ok {
+		md.HasAudio = true
+		md.Multimodal = true
+	}
 	if md.Architecture == "clip" {
 		md.Projector = true
-	}
-	if !md.Projector && md.Multimodal {
-		md.Multimodal = true
 	}
 }
 

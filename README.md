@@ -92,7 +92,9 @@ opt-in. Inference processes bind loopback with per-process keys.
 ## Known limitations
 
 - Chat Markdown has no syntax highlighting yet.
-- Attachments (images/audio/PDF) are not wired; chat sends text only.
+- Image and PDF chat attachments are not wired yet. Experimental **audio**
+  attachments can be enabled under Settings → Experimental → Audio models
+  (mirrors llama.cpp’s experimental libmtmd audio input; quality may vary).
 - Windows hardware detection is thinner than Linux.
 - No dedicated first-run onboarding wizard yet.
 - No software license selected yet.

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import ".."
 import "../components"
 
@@ -8,6 +9,7 @@ Item {
     id: page
     property var api
     property var events
+    property bool experimentalAudio: false
 
     property var conversations: []
     property var currentConv: null
@@ -23,6 +25,24 @@ Item {
     property var lastStats: null
     property string errorText: ""
     property var expandedReasoning: ({})   // messageId → bool
+    property string pendingAudioPath: ""
+    property string pendingAudioName: ""
+
+    function currentModel() {
+        if (!page.currentConv) return null
+        for (var i = 0; i < page.library.length; i++) {
+            if (page.library[i].id === page.currentConv.model_id) return page.library[i]
+        }
+        return null
+    }
+    function modelSupportsAudio() {
+        var m = page.currentModel()
+        if (!m || !m.metadata) return false
+        return !!m.metadata.has_audio
+    }
+    function canAttachAudio() {
+        return page.experimentalAudio && page.modelSupportsAudio()
+    }
 
     function reasoningExpanded(id) { return !!page.expandedReasoning[id] }
     function toggleReasoning(id) {
@@ -117,7 +137,12 @@ Item {
 
     function send() {
         var text = input.text.trim()
-        if (text === "" || !page.currentConv || page.generating) return
+        var hasAudio = page.pendingAudioPath !== ""
+        if ((!text && !hasAudio) || !page.currentConv || page.generating) return
+        if (hasAudio && !page.canAttachAudio()) {
+            page.errorText = "Audio attachments require experimental audio models and an audio-capable model."
+            return
+        }
         input.text = ""
         page.errorText = ""
         page.generating = true
@@ -136,8 +161,16 @@ Item {
                 }
             })
         }
-        api.post("/api/v1/chat/" + page.currentConv.id + "/generate",
-            { "content": text, "params": paramsDrawer.params },
+        var body = { "content": text, "params": paramsDrawer.params }
+        if (hasAudio) {
+            body.audio = {
+                "path": page.pendingAudioPath,
+                "name": page.pendingAudioName
+            }
+            page.pendingAudioPath = ""
+            page.pendingAudioName = ""
+        }
+        api.post("/api/v1/chat/" + page.currentConv.id + "/generate", body,
             function(st, data) {
                 if (st !== 202) {
                     page.generating = false
@@ -615,49 +648,102 @@ Item {
             // Input
             Rectangle {
                 Layout.fillWidth: true
-                height: inputRow.implicitHeight + 16
+                height: inputCol.implicitHeight + 16
                 color: AppTheme.bgAlt
                 border.color: AppTheme.border
-                RowLayout {
-                    id: inputRow
+                ColumnLayout {
+                    id: inputCol
                     anchors.fill: parent
                     anchors.margins: 8
-                    spacing: 8
-                    ScrollView {
+                    spacing: 6
+                    RowLayout {
+                        visible: page.pendingAudioPath !== ""
                         Layout.fillWidth: true
-                        // Grow with the wrapped text up to ~6 lines, then scroll.
-                        Layout.preferredHeight: Math.min(140, Math.max(44, input.contentHeight + 24))
-                        clip: true
-                        TextArea {
-                            id: input
-                            placeholderText: page.currentConv ? "Message (Enter to send, Shift+Enter for newline)" : "Create a chat first"
-                            enabled: page.currentConv !== null
-                            wrapMode: TextArea.Wrap
-                            Keys.onReturnPressed: function(e) {
-                                if (e.modifiers & Qt.ShiftModifier) { e.accepted = false; return }
-                                e.accepted = true
-                                page.send()
-                            }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Audio: " + page.pendingAudioName
+                            color: AppTheme.textDim
+                            elide: Text.ElideMiddle
+                            font.pixelSize: AppTheme.fontSmall
+                        }
+                        Button {
+                            text: "Remove"
+                            flat: true
+                            onClicked: { page.pendingAudioPath = ""; page.pendingAudioName = "" }
                         }
                     }
-                    Button {
-                        visible: !page.generating
-                        text: "Send"
-                        highlighted: true
-                        enabled: page.currentConv !== null && input.text.trim() !== ""
-                        onClicked: page.send()
+                    Label {
+                        visible: page.experimentalAudio && page.currentConv && !page.modelSupportsAudio()
+                        Layout.fillWidth: true
+                        text: "Audio attach is available when the chat model is tagged has_audio (rescan library after enabling experimental audio)."
+                        color: AppTheme.textFaint
+                        font.pixelSize: AppTheme.fontSmall
+                        wrapMode: Text.WordWrap
                     }
-                    Button {
-                        visible: page.generating
-                        text: "Stop"
-                        onClicked: {
-                            if (page.currentConv)
-                                page.api.post("/api/v1/chat/" + page.currentConv.id + "/stop", {}, function() {})
-                            page.generating = false
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Button {
+                            visible: page.canAttachAudio()
+                            text: "Audio"
+                            enabled: page.currentConv !== null && !page.generating
+                            ToolTip.visible: audioTip.hovered
+                            ToolTip.text: "Attach a WAV (16 kHz mono preferred). Experimental llama.cpp audio input."
+                            HoverHandler { id: audioTip }
+                            onClicked: audioDialog.open()
+                        }
+                        ScrollView {
+                            Layout.fillWidth: true
+                            // Grow with the wrapped text up to ~6 lines, then scroll.
+                            Layout.preferredHeight: Math.min(140, Math.max(44, input.contentHeight + 24))
+                            clip: true
+                            TextArea {
+                                id: input
+                                placeholderText: page.currentConv ? "Message (Enter to send, Shift+Enter for newline)" : "Create a chat first"
+                                enabled: page.currentConv !== null
+                                wrapMode: TextArea.Wrap
+                                Keys.onReturnPressed: function(e) {
+                                    if (e.modifiers & Qt.ShiftModifier) { e.accepted = false; return }
+                                    e.accepted = true
+                                    page.send()
+                                }
+                            }
+                        }
+                        Button {
+                            visible: !page.generating
+                            text: "Send"
+                            highlighted: true
+                            enabled: page.currentConv !== null && (input.text.trim() !== "" || page.pendingAudioPath !== "")
+                            onClicked: page.send()
+                        }
+                        Button {
+                            visible: page.generating
+                            text: "Stop"
+                            onClicked: {
+                                if (page.currentConv)
+                                    page.api.post("/api/v1/chat/" + page.currentConv.id + "/stop", {}, function() {})
+                                page.generating = false
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    FileDialog {
+        id: audioDialog
+        title: "Attach audio"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Audio files (*.wav *.mp3 *.flac *.ogg *.m4a *.webm)", "All files (*)"]
+        onAccepted: {
+            var url = selectedFile.toString()
+            var path = url.indexOf("file://") === 0 ? decodeURIComponent(url.replace("file://", "")) : url
+            // Windows file:///C:/... — strip leading slash before drive letter.
+            if (path.length >= 3 && path.charAt(0) === "/" && path.charAt(2) === ":")
+                path = path.substring(1)
+            page.pendingAudioPath = path
+            page.pendingAudioName = path.split(/[/\\]/).pop()
         }
     }
 

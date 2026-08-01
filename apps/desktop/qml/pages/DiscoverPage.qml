@@ -8,6 +8,7 @@ Item {
     id: page
     property var api
     property var events
+    property bool experimentalAudio: false
 
     property var results: []
     property bool searching: false
@@ -15,9 +16,40 @@ Item {
     property var detail: null
     property var detailGroups: []
     property var detailProjectors: []
+    property var detailModalities: []
     property bool withVision: true
     property bool detailLoading: false
     property bool hasToken: false
+
+    function modalityLabel(mods) {
+        if (!mods || mods.length === 0) return ""
+        var a = mods.indexOf("audio") >= 0
+        var v = mods.indexOf("vision") >= 0
+        if (a && v) return "audio+vision"
+        if (a) return "audio"
+        if (v) return "vision"
+        return ""
+    }
+
+    function projectorToggleLabel() {
+        var bytes = AppTheme.bytes(page.projectorBytes())
+        if (page.experimentalAudio) {
+            var mod = page.modalityLabel(page.detailModalities)
+            var hint = mod !== "" ? (" · " + mod) : ""
+            return "Download with multimodal projector (mmproj · " + bytes + ")" + hint
+        }
+        return "Download with vision (mmproj · " + bytes + ")"
+    }
+
+    function groupModalityTag(group) {
+        if (page.experimentalAudio) {
+            var label = page.modalityLabel(page.detailModalities)
+            if (label !== "") return label
+            if (group.vision) return "multimodal"
+            return ""
+        }
+        return group.vision ? "vision" : ""
+    }
 
     function reload() {
         api.get("/api/v1/hf/token", function(st, data) {
@@ -43,6 +75,7 @@ Item {
     function openRepo(repoId) {
         page.detailLoading = true
         page.detail = null
+        page.detailModalities = []
         page.withVision = true
         detailDialog.open()
         api.get("/api/v1/hf/repo/" + repoId, function(st, data) {
@@ -51,6 +84,7 @@ Item {
                 page.detail = data.repo
                 page.detailGroups = data.groups || []
                 page.detailProjectors = data.projectors || []
+                page.detailModalities = data.modalities || []
             } else {
                 page.searchError = (data && (data.detail || data.error)) || ("HTTP " + st)
                 detailDialog.close()
@@ -161,6 +195,11 @@ Item {
                         spacing: 2
                         RowLayout {
                             Text { text: modelData.id; color: AppTheme.text; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
+                            Tag {
+                                visible: page.experimentalAudio && page.modalityLabel(modelData.modalities) !== ""
+                                text: page.modalityLabel(modelData.modalities)
+                                tone: AppTheme.success
+                            }
                             Tag { visible: modelData.gated !== false && modelData.gated !== null; text: "gated"; tone: AppTheme.warning }
                             Tag { visible: modelData.private; text: "private"; tone: AppTheme.danger }
                         }
@@ -266,10 +305,15 @@ Item {
                         onToggled: page.withVision = checked
                     }
                     Label {
-                        text: "Download with vision (mmproj · " + AppTheme.bytes(page.projectorBytes()) + ")"
+                        text: page.projectorToggleLabel()
                         color: AppTheme.text
                         ToolTip.visible: visionHover.hovered
-                        ToolTip.text: page.detailProjectors.map(function(p) { return p.path }).join("\n")
+                        ToolTip.text: {
+                            var paths = page.detailProjectors.map(function(p) { return p.path }).join("\n")
+                            if (page.experimentalAudio && page.modalityLabel(page.detailModalities) !== "")
+                                return "Includes projector for " + page.modalityLabel(page.detailModalities) + "\n" + paths
+                            return paths
+                        }
                         HoverHandler { id: visionHover }
                         MouseArea {
                             anchors.fill: parent
@@ -300,14 +344,20 @@ Item {
                                     Layout.fillWidth: true
                                     Label { text: modelData.label; color: AppTheme.text; font.weight: Font.DemiBold }
                                     Tag { visible: modelData.split; text: modelData.parts + " parts"; tone: AppTheme.info }
-                                    Tag { visible: modelData.vision; text: "vision"; tone: AppTheme.success }
+                                    Tag {
+                                        visible: page.groupModalityTag(modelData) !== ""
+                                        text: page.groupModalityTag(modelData)
+                                        tone: AppTheme.success
+                                    }
                                     Item { Layout.fillWidth: true }
                                     Label {
                                         text: {
                                             var t = modelData.total_bytes
                                             var hasProj = modelData.files.some(function(f) { return f.kind === "projector" })
-                                            if (page.withVision && page.detailProjectors.length > 0 && !hasProj)
-                                                return AppTheme.bytes(t + page.projectorBytes()) + " (incl. vision)"
+                                            if (page.withVision && page.detailProjectors.length > 0 && !hasProj) {
+                                                var suffix = page.experimentalAudio ? " (incl. mmproj)" : " (incl. vision)"
+                                                return AppTheme.bytes(t + page.projectorBytes()) + suffix
+                                            }
                                             return AppTheme.bytes(t)
                                         }
                                         color: AppTheme.textDim

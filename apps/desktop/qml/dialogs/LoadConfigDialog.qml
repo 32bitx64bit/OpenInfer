@@ -37,6 +37,7 @@ Dialog {
         "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
         "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
         "rope_scaling": "", "alias": "", "raw_args": "",
+        "jinja": false, "no_mmproj_offload": false,
         "save_on_success": true
     })
     property string selectedRuntime: ""   // "" = auto
@@ -44,12 +45,22 @@ Dialog {
     property var estimate: null
     property string loadError: ""
 
+    function isMultimodal(m) {
+        if (!m) return false
+        if (m.projector_path && m.projector_path !== "") return true
+        var meta = m.metadata || {}
+        return !!(meta.multimodal || meta.has_audio || meta.has_vision)
+    }
+
     function openFor(m) {
         model = m
         modelId = m.id
         settings["alias"] = m.alias || ""
         if (!settings["context_length"] || settings["context_length"] <= 0)
             settings["context_length"] = 4096
+        // Multimodal chat templates (vision/audio) usually need Jinja.
+        settings["jinja"] = root.isMultimodal(m)
+        settings["no_mmproj_offload"] = false
         selectedRuntime = m.pinned_runtime || ""
         loadError = ""
         preview = null
@@ -73,6 +84,10 @@ Dialog {
                 for (var j = 0; j < root.presets.length; j++) {
                     if (root.presets[j].is_default) { root.applyPreset(root.presets[j]); break }
                 }
+            }
+            // Presets may omit jinja; keep multimodal default if still unset.
+            if (root.settings.jinja === undefined || root.settings.jinja === null) {
+                root.setSetting("jinja", root.isMultimodal(m))
             }
         })
         open()
@@ -396,6 +411,29 @@ Dialog {
                     Label {
                         text: root.model && root.model.projector_path !== "" ? "Paired automatically" : "None"
                         color: AppTheme.textDim
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    label: "Jinja chat template"
+                    hint: "Required by many multimodal (vision/audio) models. Enabled by default when a projector is paired."
+                    argName: "--jinja"
+                    Switch {
+                        checked: !!root.settings.jinja
+                        onToggled: root.setSetting("jinja", checked)
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    visible: root.model && root.model.projector_path !== ""
+                    label: "Keep projector on CPU"
+                    hint: "Disable GPU offload for the multimodal projector (saves VRAM)."
+                    argName: "--no-mmproj-offload"
+                    Switch {
+                        checked: !!root.settings.no_mmproj_offload
+                        onToggled: root.setSetting("no_mmproj_offload", checked)
                     }
                 }
 

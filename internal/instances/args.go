@@ -38,6 +38,7 @@ type LoadSettings struct {
 	MediaPath       string            `json:"media_path"`
 	ChatTemplate    string            `json:"chat_template"`
 	Jinja           *bool             `json:"jinja"`
+	NoMmprojOffload bool              `json:"no_mmproj_offload"`
 	LoraPath        string            `json:"lora_path"`
 	LoraScale       float64           `json:"lora_scale"`
 	DraftModel      string            `json:"draft_model"`
@@ -267,6 +268,9 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	}
 	if s.Jinja != nil && *s.Jinja {
 		add("--jinja")
+	}
+	if s.NoMmprojOffload {
+		add("--no-mmproj-offload")
 	}
 	if s.LoraPath != "" {
 		if s.LoraScale > 0 {

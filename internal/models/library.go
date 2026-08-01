@@ -177,13 +177,39 @@ func (l *Library) Scan() (int, error) {
 			total += f.size
 		}
 		var proj string
+		var projHasVision, projHasAudio bool
 		if p, ok := projectors[filepath.Dir(primary)]; ok {
 			proj = p.path
 			total += p.size
+			if _, pmd, perr := gguf.ValidateFile(proj); perr == nil {
+				projHasVision = pmd.HasVision
+				projHasAudio = pmd.HasAudio
+				// CLIP projectors often only set architecture=clip; treat as vision
+				// unless audio encoder keys are present.
+				if pmd.Projector && !projHasVision && !projHasAudio {
+					projHasVision = true
+				}
+			}
+			// Filename heuristics when mmproj metadata is sparse.
+			plower := strings.ToLower(filepath.Base(proj) + " " + filepath.Base(primary))
+			for _, h := range []string{"ultravox", "voxtral", "asr", "whisper", "audio", "omni"} {
+				if strings.Contains(plower, h) {
+					projHasAudio = true
+				}
+			}
+			for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm"} {
+				if strings.Contains(plower, h) {
+					projHasVision = true
+				}
+			}
 		}
+		hasVision := md.HasVision || projHasVision
+		hasAudio := md.HasAudio || projHasAudio
+		multimodal := md.Multimodal || hasVision || hasAudio || proj != ""
 		metaJSON, _ := json.Marshal(map[string]any{
 			"name": md.Name, "tokenizer": md.Tokenizer,
-			"multimodal": md.Multimodal, "version": md.Version,
+			"multimodal": multimodal, "has_vision": hasVision, "has_audio": hasAudio,
+			"version":     md.Version,
 			"block_count": md.BlockCount, "head_count": md.HeadCount,
 			"head_count_kv": md.HeadCountKV, "head_dim": md.HeadDim,
 			"embedding_length": md.Embedding,

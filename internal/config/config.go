@@ -17,19 +17,20 @@ type Layout struct {
 	DataDir   string // platform data dir root
 	CacheDir  string // platform cache dir
 
-	Database  string // <data>/database
-	Runtimes  string // <data>/runtimes
-	Models    string // <data>/models
-	Downloads string // <data>/downloads
-	Partial   string // <data>/downloads/partial
-	Active    string // <data>/downloads/active
-	HFCache   string // <data>/cache/huggingface
-	MetaCache string // <data>/cache/metadata
-	AppLogs   string // <data>/logs/application
-	InstLogs  string // <data>/logs/instances
-	Presets   string // <data>/presets
-	Sessions  string // <data>/sessions
-	Temp      string // <data>/temp
+	Database    string // <data>/database
+	Runtimes    string // <data>/runtimes
+	Models      string // <data>/models
+	Downloads   string // <data>/downloads
+	Partial     string // <data>/downloads/partial
+	Active      string // <data>/downloads/active
+	HFCache     string // <data>/cache/huggingface
+	MetaCache   string // <data>/cache/metadata
+	AppLogs     string // <data>/logs/application
+	InstLogs    string // <data>/logs/instances
+	Presets     string // <data>/presets
+	Sessions    string // <data>/sessions
+	Temp        string // <data>/temp
+	Attachments string // <data>/attachments (chat audio/files)
 }
 
 // Open resolves the layout, creating every directory. If dataOverride is
@@ -70,11 +71,12 @@ func Open(dataOverride string) (*Layout, error) {
 	l.Presets = filepath.Join(dataDir, "presets")
 	l.Sessions = filepath.Join(dataDir, "sessions")
 	l.Temp = filepath.Join(dataDir, "temp")
+	l.Attachments = filepath.Join(dataDir, "attachments")
 
 	for _, d := range []string{
 		l.ConfigDir, l.DataDir, l.CacheDir, l.Database, l.Runtimes, l.Models,
 		l.Partial, l.Active, l.HFCache, l.MetaCache, l.AppLogs, l.InstLogs,
-		l.Presets, l.Sessions, l.Temp,
+		l.Presets, l.Sessions, l.Temp, l.Attachments,
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("creating %s: %w", d, err)

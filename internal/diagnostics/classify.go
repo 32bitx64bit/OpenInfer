@@ -15,6 +15,7 @@ const (
 	ClassRuntimeTooOld      FailureClass = "runtime-too-old"
 	ClassMissingProjector   FailureClass = "missing-projector"
 	ClassWrongProjector     FailureClass = "incorrect-projector"
+	ClassAudioUnsupported   FailureClass = "audio-unsupported"
 	ClassCorruptGGUF        FailureClass = "corrupt-gguf"
 	ClassMissingShard       FailureClass = "missing-shard"
 	ClassInsufficientRAM    FailureClass = "insufficient-ram"
@@ -63,6 +64,9 @@ var rules = []rule{
 	{ClassWrongProjector, regexp.MustCompile(`(?i)(mmproj|projector).*(mismatch|incompatible|does not match)`),
 		"The projector file does not match this model.",
 		"Use the projector published with this exact model variant."},
+	{ClassAudioUnsupported, regexp.MustCompile(`(?i)audio input is not supported`),
+		"The runtime rejected audio input (missing or incompatible multimodal projector, or an older llama-server).",
+		"Load the matching mmproj, enable Jinja for chat templates, and update to a recent multimodal llama.cpp runtime. Audio support is experimental upstream."},
 	{ClassInsufficientVRAM, regexp.MustCompile(`(?i)(cuda|vulkan|hip|metal).*(out of memory|oom|allocation failed)|ggml_cuda.*alloc`),
 		"The GPU ran out of memory while loading or allocating context.",
 		"Reduce GPU layers, lower the context size, or switch KV cache to q8_0. A CPU fallback is available."},

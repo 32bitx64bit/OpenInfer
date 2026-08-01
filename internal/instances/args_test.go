@@ -159,3 +159,23 @@ func TestQuoteCommand(t *testing.T) {
 		t.Errorf("simple args should stay bare: %q", q)
 	}
 }
+
+func TestBuildArgsNoMmprojOffload(t *testing.T) {
+	help := testHelp + "\n  --no-mmproj-offload\n  --jinja\n"
+	caps := append(testCaps(), "no-mmproj-offload", "jinja")
+	s := DefaultSettings()
+	s.NoMmprojOffload = true
+	j := true
+	s.Jinja = &j
+	br := BuildArgs(s, "/m.gguf", "/mm.gguf", caps, help, "127.0.0.1", 1, "k")
+	joined := strings.Join(br.Args, " ")
+	if !strings.Contains(joined, "--mmproj /mm.gguf") {
+		t.Fatalf("missing mmproj: %s", joined)
+	}
+	if !strings.Contains(joined, "--no-mmproj-offload") {
+		t.Fatalf("missing no-mmproj-offload: %s", joined)
+	}
+	if !strings.Contains(joined, "--jinja") {
+		t.Fatalf("missing jinja: %s", joined)
+	}
+}

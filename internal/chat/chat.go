@@ -7,11 +7,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -67,6 +70,20 @@ type GenParams struct {
 	ChatTemplateKwargs string   `json:"chat_template_kwargs,omitempty"`
 }
 
+// AudioInput is optional audio for a user turn (experimental llama.cpp path).
+type AudioInput struct {
+	Path   string `json:"path,omitempty"`   // local file from the desktop picker
+	Data   string `json:"data,omitempty"`   // base64-encoded bytes (tests / alternate clients)
+	Format string `json:"format,omitempty"` // wav, mp3, …
+	Name   string `json:"name,omitempty"`
+}
+
+const maxAudioBytes = 25 << 20
+
+var allowedAudioExt = map[string]bool{
+	"wav": true, "mp3": true, "flac": true, "ogg": true, "m4a": true, "webm": true,
+}
+
 var now = func() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 // EndpointProvider resolves model IDs to ready instance endpoints.
@@ -92,6 +109,7 @@ type Service struct {
 	cancels map[string]context.CancelFunc
 
 	streaming atomic.Bool
+	attachDir string
 }
 
 func NewService(db *sql.DB, events EventSink, eps EndpointProvider) *Service {
@@ -103,6 +121,9 @@ func NewService(db *sql.DB, events EventSink, eps EndpointProvider) *Service {
 	s.streaming.Store(true) // streaming is the default
 	return s
 }
+
+// SetAttachDir sets where chat audio attachments are stored on disk.
+func (s *Service) SetAttachDir(dir string) { s.attachDir = dir }
 
 // SetStreaming toggles token streaming. When disabled, requests use
 // stream:false and the full response is emitted as one event.
@@ -146,6 +167,20 @@ func (s *Service) ListConversations(includeArchived bool) ([]Conversation, error
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+func (s *Service) GetConversation(id string) (*Conversation, error) {
+	var c Conversation
+	var params string
+	var arch int
+	err := s.db.QueryRow(`SELECT id,title,model_id,system,params_json,archived,created_at,updated_at FROM conversations WHERE id=?`, id).
+		Scan(&c.ID, &c.Title, &c.ModelID, &c.System, &params, &arch, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	c.Params = json.RawMessage(params)
+	c.Archived = arch == 1
+	return &c, nil
 }
 
 func (s *Service) RenameConversation(id, title string) error {
@@ -279,8 +314,8 @@ type TokenEvent struct {
 
 // Generate streams an assistant reply for the chain ending at parentID
 // ("" = continue from the latest leaf). The user message is persisted first
-// when content is non-empty. Events: chat.token with TokenEvent payloads.
-func (s *Service) Generate(ctx context.Context, convID, parentID, userContent string, params GenParams) (string, error) {
+// when content is non-empty or audio is attached. Events: chat.token.
+func (s *Service) Generate(ctx context.Context, convID, parentID, userContent string, params GenParams, audio *AudioInput) (string, error) {
 	var conv Conversation
 	var paramsJSON string
 	var arch int
@@ -291,13 +326,24 @@ func (s *Service) Generate(ctx context.Context, convID, parentID, userContent st
 	}
 
 	// Branch point: explicit parent (edit/regenerate) or latest leaf.
-	if parentID == "" && userContent != "" {
+	if parentID == "" && (userContent != "" || audio != nil) {
 		parentID, _ = s.latestLeaf(convID)
 	}
-	if userContent != "" {
-		um, err := s.addMessage(convID, parentID, "user", userContent)
+	if userContent != "" || audio != nil {
+		display := userContent
+		if audio != nil && strings.TrimSpace(display) == "" {
+			display = "[Audio attached]"
+		} else if audio != nil {
+			display = userContent + "\n[Audio attached]"
+		}
+		um, err := s.addMessage(convID, parentID, "user", display)
 		if err != nil {
 			return "", err
+		}
+		if audio != nil {
+			if err := s.persistAudio(um.ID, audio); err != nil {
+				return "", err
+			}
 		}
 		parentID = um.ID
 		s.events.Publish("chat.message", map[string]any{"conv_id": convID, "message": um})
@@ -365,19 +411,9 @@ type Stats struct {
 func (s *Service) stream(ctx context.Context, conv Conversation, ep Endpoint,
 	chain []Message, assistantID string, params GenParams) (*Stats, error) {
 
-	type oaiMessage struct {
-		Role    string `json:"role"`
-		Content any    `json:"content"`
-	}
-	msgs := []oaiMessage{}
-	if conv.System != "" {
-		msgs = append(msgs, oaiMessage{Role: "system", Content: conv.System})
-	}
-	for _, m := range chain {
-		if m.Error != "" || (m.Role == "assistant" && m.Content == "") {
-			continue
-		}
-		msgs = append(msgs, oaiMessage{Role: m.Role, Content: m.Content})
+	msgs, err := s.buildOAIMessages(conv, chain)
+	if err != nil {
+		return nil, err
 	}
 
 	stream := s.streaming.Load()
@@ -565,6 +601,154 @@ func (s *Service) nonStreamingResponse(resp *http.Response, convID, assistantID 
 	// One consolidated event so the UI updates identically to streaming.
 	s.events.Publish("chat.token", TokenEvent{ConvID: convID, MessageID: assistantID, Delta: content, Reasoning: reasoning})
 	return stats, nil
+}
+
+type oaiMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+// buildOAIMessages constructs OpenAI-compatible messages, expanding audio
+// attachments into input_audio content parts when present.
+func (s *Service) buildOAIMessages(conv Conversation, chain []Message) ([]oaiMessage, error) {
+	msgs := []oaiMessage{}
+	if conv.System != "" {
+		msgs = append(msgs, oaiMessage{Role: "system", Content: conv.System})
+	}
+	for _, m := range chain {
+		if m.Error != "" || (m.Role == "assistant" && m.Content == "") {
+			continue
+		}
+		content, err := s.messageContent(m)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, oaiMessage{Role: m.Role, Content: content})
+	}
+	return msgs, nil
+}
+
+func (s *Service) messageContent(m Message) (any, error) {
+	att, err := s.audioAttachment(m.ID)
+	if err != nil {
+		return nil, err
+	}
+	if att == nil {
+		return m.Content, nil
+	}
+	data, err := os.ReadFile(att.path)
+	if err != nil {
+		return nil, fmt.Errorf("reading audio attachment: %w", err)
+	}
+	text := strings.TrimSuffix(m.Content, "\n[Audio attached]")
+	text = strings.TrimSpace(text)
+	if text == "" || text == "[Audio attached]" {
+		text = "Transcribe or respond to this audio."
+	}
+	parts := []map[string]any{
+		{"type": "text", "text": text},
+		{"type": "input_audio", "input_audio": map[string]any{
+			"data":   base64.StdEncoding.EncodeToString(data),
+			"format": att.format,
+		}},
+	}
+	return parts, nil
+}
+
+type audioAtt struct {
+	path   string
+	format string
+}
+
+func (s *Service) audioAttachment(messageID string) (*audioAtt, error) {
+	var path, mime, name string
+	err := s.db.QueryRow(`SELECT path, mime, name FROM attachments WHERE message_id=? AND kind='audio' LIMIT 1`, messageID).
+		Scan(&path, &mime, &name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if format == "" {
+		format = strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
+	}
+	if format == "" && strings.Contains(mime, "/") {
+		format = strings.TrimPrefix(mime, "audio/")
+	}
+	if format == "" {
+		format = "wav"
+	}
+	return &audioAtt{path: path, format: format}, nil
+}
+
+func (s *Service) persistAudio(messageID string, audio *AudioInput) error {
+	if audio == nil {
+		return nil
+	}
+	if s.attachDir == "" {
+		return errors.New("attachments directory not configured")
+	}
+	raw, format, name, err := resolveAudioBytes(audio)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return errors.New("empty audio attachment")
+	}
+	if len(raw) > maxAudioBytes {
+		return fmt.Errorf("audio attachment exceeds %d byte limit", maxAudioBytes)
+	}
+	if err := os.MkdirAll(s.attachDir, 0o755); err != nil {
+		return err
+	}
+	id := uuid.NewString()
+	dest := filepath.Join(s.attachDir, id+"."+format)
+	if err := os.WriteFile(dest, raw, 0o600); err != nil {
+		return err
+	}
+	mime := "audio/" + format
+	_, err = s.db.Exec(`INSERT INTO attachments(id,message_id,kind,path,mime,name,size_bytes) VALUES (?,?,?,?,?,?,?)`,
+		id, messageID, "audio", dest, mime, name, len(raw))
+	return err
+}
+
+func resolveAudioBytes(audio *AudioInput) (raw []byte, format, name string, err error) {
+	format = strings.ToLower(strings.TrimPrefix(audio.Format, "."))
+	name = audio.Name
+	if audio.Data != "" {
+		raw, err = base64.StdEncoding.DecodeString(audio.Data)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("invalid audio base64: %w", err)
+		}
+		if format == "" {
+			format = "wav"
+		}
+		if name == "" {
+			name = "audio." + format
+		}
+	} else if audio.Path != "" {
+		raw, err = os.ReadFile(audio.Path)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("reading audio file: %w", err)
+		}
+		if name == "" {
+			name = filepath.Base(audio.Path)
+		}
+		if format == "" {
+			format = strings.TrimPrefix(strings.ToLower(filepath.Ext(audio.Path)), ".")
+		}
+	} else {
+		return nil, "", "", errors.New("audio requires path or data")
+	}
+	if format == "" {
+		format = "wav"
+	}
+	if !allowedAudioExt[format] {
+		return nil, "", "", fmt.Errorf("unsupported audio format %q (use wav/mp3/flac/ogg/m4a/webm)", format)
+	}
+	return raw, format, name, nil
 }
 
 // applyParams merges validated generation params into the request body.

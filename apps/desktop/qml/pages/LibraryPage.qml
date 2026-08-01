@@ -10,6 +10,7 @@ Item {
     id: page
     property var api
     property var events
+    property bool experimentalAudio: false
 
     property var models: []
     property var instances: ({})
@@ -17,6 +18,21 @@ Item {
     property bool scanning: false
     property string filter: ""
     property var selected: null
+
+    function modalityTag(m) {
+        if (!m || m.projector_path === "") return ""
+        var meta = m.metadata || {}
+        var hasA = !!meta.has_audio
+        var hasV = !!meta.has_vision
+        if (page.experimentalAudio) {
+            if (hasA && hasV) return "audio+vision"
+            if (hasA) return "audio"
+            if (hasV) return "vision"
+            return "multimodal"
+        }
+        // Setting off: keep historical "vision" label for any projector pair.
+        return "vision"
+    }
 
     signal openDetail(string modelId)
 
@@ -165,8 +181,8 @@ Item {
                                 Tag { visible: modelData.quantization !== ""; text: modelData.quantization; tone: AppTheme.info }
                                 Tag { visible: modelData.architecture !== ""; text: modelData.architecture; tone: AppTheme.accent }
                                 Tag {
-                                    visible: modelData.projector_path !== ""
-                                    text: "vision"; tone: AppTheme.success
+                                    visible: page.modalityTag(modelData) !== ""
+                                    text: page.modalityTag(modelData); tone: AppTheme.success
                                 }
                             }
                             RowLayout {

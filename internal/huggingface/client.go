@@ -107,15 +107,17 @@ func (e *APIError) Error() string {
 
 // SearchResult is one row of the Discover page.
 type SearchResult struct {
-	ID        string    `json:"id"`
-	Author    string    `json:"author"`
-	Downloads int64     `json:"downloads"`
-	Likes     int64     `json:"likes"`
-	Trending  float64   `json:"trending_score"`
-	UpdatedAt time.Time `json:"last_modified"`
-	Tags      []string  `json:"tags"`
-	Private   bool      `json:"private"`
-	Gated     any       `json:"gated"` // false | "auto" | "manual"
+	ID          string    `json:"id"`
+	Author      string    `json:"author"`
+	Downloads   int64     `json:"downloads"`
+	Likes       int64     `json:"likes"`
+	Trending    float64   `json:"trending_score"`
+	UpdatedAt   time.Time `json:"last_modified"`
+	Tags        []string  `json:"tags"`
+	Private     bool      `json:"private"`
+	Gated       any       `json:"gated"` // false | "auto" | "manual"
+	PipelineTag string    `json:"pipeline_tag,omitempty"`
+	Modalities  []string  `json:"modalities,omitempty"` // audio | vision
 }
 
 // hfModel mirrors the /api/models payload fields we use.
@@ -129,6 +131,7 @@ type hfModel struct {
 	Tags          []string  `json:"tags"`
 	Private       bool      `json:"private"`
 	Gated         any       `json:"gated"`
+	PipelineTag   string    `json:"pipeline_tag"`
 	Siblings      []struct {
 		RFileName string `json:"rfilename"`
 	} `json:"siblings"`
@@ -167,7 +170,8 @@ func (c *Client) Search(ctx context.Context, query, sort string, limit int) ([]S
 		out = append(out, SearchResult{
 			ID: m.ID, Author: author, Downloads: m.Downloads, Likes: m.Likes,
 			Trending: m.TrendingScore, UpdatedAt: m.LastModified, Tags: m.Tags,
-			Private: m.Private, Gated: m.Gated,
+			Private: m.Private, Gated: m.Gated, PipelineTag: m.PipelineTag,
+			Modalities: DetectModalities(m.ID, m.PipelineTag, m.Tags),
 		})
 	}
 	return out, nil
@@ -181,16 +185,17 @@ type FileEntry struct {
 
 // RepoInfo is the repository detail payload.
 type RepoInfo struct {
-	ID        string         `json:"id"`
-	Author    string         `json:"author"`
-	Downloads int64          `json:"downloads"`
-	Likes     int64          `json:"likes"`
-	Tags      []string       `json:"tags"`
-	Gated     any            `json:"gated"`
-	Card      string         `json:"card"`
-	CardData  map[string]any `json:"card_data"`
-	Files     []FileEntry    `json:"files"`
-	SHA       string         `json:"sha"`
+	ID          string         `json:"id"`
+	Author      string         `json:"author"`
+	Downloads   int64          `json:"downloads"`
+	Likes       int64          `json:"likes"`
+	Tags        []string       `json:"tags"`
+	Gated       any            `json:"gated"`
+	PipelineTag string         `json:"pipeline_tag,omitempty"`
+	Card        string         `json:"card"`
+	CardData    map[string]any `json:"card_data"`
+	Files       []FileEntry    `json:"files"`
+	SHA         string         `json:"sha"`
 }
 
 // Repo fetches repository metadata, the recursive file tree and the model
@@ -220,7 +225,7 @@ func (c *Client) Repo(ctx context.Context, repo string) (*RepoInfo, error) {
 
 	info := &RepoInfo{
 		ID: m.ID, Author: m.Author, Downloads: m.Downloads, Likes: m.Likes,
-		Tags: m.Tags, Gated: m.Gated, CardData: m.CardData,
+		Tags: m.Tags, Gated: m.Gated, CardData: m.CardData, PipelineTag: m.PipelineTag,
 	}
 	for _, f := range tree {
 		if f.Type == "directory" {

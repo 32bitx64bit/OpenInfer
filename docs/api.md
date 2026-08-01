@@ -19,8 +19,8 @@ Errors: `{"error": "message", "detail": "debug detail"}`.
 
 | Method & path | Purpose |
 |---|---|
-| GET `/hf/search?q=&sort=&limit=` | GGUF repo search (sort: downloads, likes, trending, lastModified) |
-| GET `/hf/repo/{author}/{name}` | repo detail + grouped file sets + model card |
+| GET `/hf/search?q=&sort=&limit=` | GGUF repo search (sort: downloads, likes, trending, lastModified); results include `modalities` when detectable |
+| GET `/hf/repo/{author}/{name}` | repo detail + grouped file sets + `modalities` + model card |
 | GET/PUT/DELETE `/hf/token` | token status / store in OS keychain / remove |
 
 ## Downloads
@@ -85,8 +85,10 @@ Events: `instance.state_changed`, `instance.updated`, `instance.activity`,
 | PATCH `/chat/{id}` | title, model_id, system, archived, params |
 | DELETE `/chat/{id}` | delete |
 | GET `/chat/{id}/messages` | full message tree (branches included) |
-| POST `/chat/{id}/generate` | `{parent_id?, content?, params?}` → streams `chat.token` events; empty content + parent_id = regenerate/branch |
+| POST `/chat/{id}/generate` | `{parent_id?, content?, params?, audio?}` → streams `chat.token`; `audio` requires Settings `experimental.audio_models=1` and a `has_audio` model (`{path\|data, format?, name?}`) |
 | POST `/chat/{id}/stop` | cancel generation |
+
+Setting keys of note: `experimental.audio_models` (`"0"`/`"1"`, default off) gates audio discovery labels and chat audio attachments.
 
 ## Public server
 

@@ -42,9 +42,16 @@ Item {
         })
     }
 
+    signal settingChanged(string key, string value)
+
     function setSetting(key, value) {
-        api.put("/api/v1/settings/" + key, { "value": String(value) }, function(st, data) {
+        var v = String(value)
+        api.put("/api/v1/settings/" + key, { "value": v }, function(st, data) {
             if (st === 200) {
+                var next = Object.assign({}, page.settings)
+                next[key] = v
+                page.settings = next
+                page.settingChanged(key, v)
                 page.statusText = "Saved."
                 statusClear.restart()
             }
@@ -229,6 +236,21 @@ Item {
                             checked: (page.settings["runtimes.update_checks"] || "1") === "1"
                             onToggled: page.setSetting("runtimes.update_checks", checked ? "1" : "0")
                         }
+                    }
+                }
+            }
+
+            // Experimental features (upstream llama.cpp audio is experimental)
+            GroupBox {
+                Layout.fillWidth: true
+                title: "Experimental"
+                FormField {
+                    width: parent.width
+                    label: "Audio models"
+                    hint: "Enable audio / multimodal-audio discovery, labeling, and chat attachments. llama.cpp audio input via libmtmd is experimental and may have reduced quality; use a recent multimodal-capable runtime."
+                    Switch {
+                        checked: (page.settings["experimental.audio_models"] || "0") === "1"
+                        onToggled: page.setSetting("experimental.audio_models", checked ? "1" : "0")
                     }
                 }
             }

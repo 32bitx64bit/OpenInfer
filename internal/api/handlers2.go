@@ -202,6 +202,7 @@ func (h *handlers) previewLoad(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	h.applyMultimodalDefaults(r.PathValue("id"), &s)
 	br, err := h.d.IM.Preview(r.PathValue("id"), s)
 	if err != nil {
 		writeErr(w, 400, "preview failed", err)
@@ -266,12 +267,35 @@ func (h *handlers) loadModel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	h.applyMultimodalDefaults(r.PathValue("id"), &s)
 	inst, err := h.d.IM.Start(r.PathValue("id"), s)
 	if err != nil {
 		writeErr(w, 400, "load failed", err)
 		return
 	}
 	writeJSON(w, 202, inst)
+}
+
+// applyMultimodalDefaults enables Jinja when omitted and the model is
+// multimodal — most audio/vision chat templates require it.
+func (h *handlers) applyMultimodalDefaults(modelID string, s *instances.LoadSettings) {
+	if s.Jinja != nil {
+		return
+	}
+	m, err := h.d.Lib.Get(modelID)
+	if err != nil {
+		return
+	}
+	var meta struct {
+		HasAudio   bool `json:"has_audio"`
+		HasVision  bool `json:"has_vision"`
+		Multimodal bool `json:"multimodal"`
+	}
+	_ = json.Unmarshal(m.Metadata, &meta)
+	if m.ProjectorPath != "" || meta.HasAudio || meta.HasVision || meta.Multimodal {
+		t := true
+		s.Jinja = &t
+	}
 }
 
 func (h *handlers) unloadModel(w http.ResponseWriter, r *http.Request) {
@@ -491,9 +515,10 @@ func (h *handlers) listMessages(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) generate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ParentID string         `json:"parent_id"`
-		Content  string         `json:"content"`
-		Params   chat.GenParams `json:"params"`
+		ParentID string           `json:"parent_id"`
+		Content  string           `json:"content"`
+		Params   chat.GenParams   `json:"params"`
+		Audio    *chat.AudioInput `json:"audio"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -502,7 +527,31 @@ func (h *handlers) generate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "message too large", nil)
 		return
 	}
-	msgID, err := h.d.Chat.Generate(r.Context(), r.PathValue("id"), req.ParentID, req.Content, req.Params)
+	if req.Audio != nil {
+		if h.d.Settings.Get("experimental.audio_models", "0") != "1" {
+			writeErr(w, 400, "experimental audio models are disabled; enable them in Settings", nil)
+			return
+		}
+		conv, err := h.d.Chat.GetConversation(r.PathValue("id"))
+		if err != nil {
+			writeErr(w, 404, "conversation not found", err)
+			return
+		}
+		mdl, err := h.d.Lib.Get(conv.ModelID)
+		if err != nil {
+			writeErr(w, 400, "model not found for conversation", err)
+			return
+		}
+		var meta struct {
+			HasAudio bool `json:"has_audio"`
+		}
+		_ = json.Unmarshal(mdl.Metadata, &meta)
+		if !meta.HasAudio {
+			writeErr(w, 400, "selected model does not support audio input; enable Audio models in Settings and rescan the library if this model has an audio mmproj", nil)
+			return
+		}
+	}
+	msgID, err := h.d.Chat.Generate(r.Context(), r.PathValue("id"), req.ParentID, req.Content, req.Params, req.Audio)
 	if err != nil {
 		writeErr(w, 400, "generation failed to start", err)
 		return

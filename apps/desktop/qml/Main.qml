@@ -47,7 +47,14 @@ ApplicationWindow {
     property var hardware: null
     property var recommendation: null
     property int downloadCount: 0
+    property bool experimentalAudioModels: false
 
+    function refreshSettings() {
+        api.get("/api/v1/settings", function(st, data) {
+            if (st === 200 && data)
+                window.experimentalAudioModels = (data["experimental.audio_models"] || "0") === "1"
+        })
+    }
     function refreshInstances() {
         api.get("/api/v1/instances", function(st, data) {
             if (st === 200 && data) window.instances = data.instances || []
@@ -63,6 +70,7 @@ ApplicationWindow {
     function reloadAll() {
         refreshInstances()
         refreshDownloadsBadge()
+        refreshSettings()
         api.get("/api/v1/hardware", function(st, data) {
             if (st === 200 && data) {
                 window.hardware = data.hardware
@@ -226,14 +234,21 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                ChatPage      { api: api; events: events }
-                DiscoverPage  { api: api; events: events }
-                LibraryPage   { api: api; events: events; onOpenDetail: function(modelId) { window.openInstanceDetail(modelId) } }
+                ChatPage      { api: api; events: events; experimentalAudio: window.experimentalAudioModels }
+                DiscoverPage  { api: api; events: events; experimentalAudio: window.experimentalAudioModels }
+                LibraryPage   { api: api; events: events; experimentalAudio: window.experimentalAudioModels; onOpenDetail: function(modelId) { window.openInstanceDetail(modelId) } }
                 DeveloperPage { api: api; events: events }
                 RuntimesPage  { api: api; events: events; recommendation: window.recommendation }
                 DownloadsPage { api: api; events: events }
                 LogsPage      { api: api; events: events }
-                SettingsPage  { api: api; events: events }
+                SettingsPage  {
+                    api: api
+                    events: events
+                    onSettingChanged: function(key, value) {
+                        if (key === "experimental.audio_models")
+                            window.experimentalAudioModels = value === "1"
+                    }
+                }
                 InstanceDetailPage {
                     id: instanceDetailPage
                     api: api

@@ -141,6 +141,7 @@ func main() {
 	chatEP := &chatEndpointAdapter{im: im}
 	chatSvc := chat.NewService(db.DB, hub, chatEP)
 	chatSvc.SetStreaming(settings.Get("chat.streaming", "1") != "0")
+	chatSvc.SetAttachDir(layout.Attachments)
 
 	proxyEP := &proxyEndpointAdapter{im: im}
 	px := proxy.NewServer(proxyEP, db.DB, logs.Logger("proxy", slog.LevelInfo).Logger)
