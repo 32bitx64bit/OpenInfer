@@ -552,6 +552,7 @@ Item {
                                         color: AppTheme.border
                                     }
                                     RowLayout {
+                                        id: reasoningHeader
                                         Layout.fillWidth: true
                                         spacing: 6
                                         Label {
@@ -563,23 +564,24 @@ Item {
                                         Label {
                                             visible: !page.reasoningExpanded(modelData.id)
                                             Layout.fillWidth: true
-                                            text: page.reasoningPreview(modelData.id === page.streamingId ? page.streamReasoning : modelData.reasoning)
+                                            text: page.reasoningPreview(modelData.id === page.streamingId
+                                                ? page.streamReasoning : (modelData.reasoning || ""))
                                             color: AppTheme.textFaint
                                             font.italic: true
                                             font.pixelSize: AppTheme.fontSmall
                                             elide: Text.ElideRight
                                         }
                                         Item { Layout.fillWidth: true }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: page.toggleReasoning(modelData.id)
+                                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                        TapHandler {
+                                            onTapped: page.toggleReasoning(modelData.id)
                                         }
                                     }
                                     Label {
                                         Layout.fillWidth: true
                                         visible: page.reasoningExpanded(modelData.id)
-                                        text: modelData.id === page.streamingId ? page.streamReasoning : modelData.reasoning
+                                        text: (modelData.id === page.streamingId
+                                            ? page.streamReasoning : modelData.reasoning) || ""
                                         wrapMode: Text.WordWrap
                                         color: AppTheme.textDim
                                         font.pixelSize: AppTheme.fontSmall

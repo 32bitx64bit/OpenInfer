@@ -38,6 +38,7 @@ type LoadSettings struct {
 	MediaPath       string            `json:"media_path"`
 	ChatTemplate    string            `json:"chat_template"`
 	Jinja           *bool             `json:"jinja"`
+	NoMmproj        bool              `json:"no_mmproj"` // skip paired multimodal projector
 	NoMmprojOffload bool              `json:"no_mmproj_offload"`
 	LoraPath        string            `json:"lora_path"`
 	LoraScale       float64           `json:"lora_scale"`
@@ -46,6 +47,10 @@ type LoadSettings struct {
 	ReasoningFormat string            `json:"reasoning_format"`
 	RawArgs         string            `json:"raw_args"`      // expert: space-separated, validated, never shell
 	EnvOverrides    map[string]string `json:"env_overrides"` // allowlisted keys only
+
+	// RuntimeID selects a specific installed llama-server build for this load.
+	// Empty = model pin, else global preferred. Not a llama-server flag.
+	RuntimeID string `json:"runtime_id"`
 
 	// SaveOnSuccess persists these settings as the model's last-known-good
 	// preset once the instance reaches ready. Failed loads leave any previous
@@ -118,8 +123,15 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	}
 
 	args = append(args, "--model", modelPath)
-	if projectorPath != "" {
+	if projectorPath != "" && !s.NoMmproj {
 		add("--mmproj", projectorPath)
+	}
+	if s.NoMmproj {
+		// Prevent auto-discovery of a same-directory mmproj on newer runtimes.
+		add("--no-mmproj")
+		if projectorPath != "" {
+			res = append(res, Resolution{"Multimodal projector", "paired", "skipped (--no-mmproj)"})
+		}
 	}
 	add("--host", host)
 	add("--port", strconv.Itoa(port))
@@ -269,7 +281,7 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	if s.Jinja != nil && *s.Jinja {
 		add("--jinja")
 	}
-	if s.NoMmprojOffload {
+	if s.NoMmprojOffload && !s.NoMmproj {
 		add("--no-mmproj-offload")
 	}
 	if s.LoraPath != "" {

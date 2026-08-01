@@ -179,3 +179,31 @@ func TestBuildArgsNoMmprojOffload(t *testing.T) {
 		t.Fatalf("missing jinja: %s", joined)
 	}
 }
+
+func TestBuildArgsNoMmproj(t *testing.T) {
+	help := testHelp + "\n  --no-mmproj\n  --no-mmproj-offload\n"
+	caps := append(testCaps(), "no-mmproj", "no-mmproj-offload")
+	s := DefaultSettings()
+	s.NoMmproj = true
+	s.NoMmprojOffload = true // must be ignored when projector is skipped
+	br := BuildArgs(s, "/m.gguf", "/mm.gguf", caps, help, "127.0.0.1", 1, "k")
+	joined := strings.Join(br.Args, " ")
+	if strings.Contains(joined, "--mmproj") {
+		t.Fatalf("mmproj must be omitted when no_mmproj: %s", joined)
+	}
+	if !strings.Contains(joined, "--no-mmproj") {
+		t.Fatalf("missing --no-mmproj: %s", joined)
+	}
+	if strings.Contains(joined, "--no-mmproj-offload") {
+		t.Fatalf("no-mmproj-offload must be skipped with no_mmproj: %s", joined)
+	}
+	found := false
+	for _, r := range br.Resolutions {
+		if r.Setting == "Multimodal projector" && strings.Contains(r.Resolved, "skipped") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected projector skipped resolution: %+v", br.Resolutions)
+	}
+}

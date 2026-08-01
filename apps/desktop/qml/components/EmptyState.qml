@@ -1,8 +1,9 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import ".."
 
-Column {
+ColumnLayout {
     id: root
     property string icon: "◇"
     property string title: "Nothing here yet"
@@ -11,31 +12,33 @@ Column {
     signal actionTriggered()
 
     spacing: 8
-    Text {
+
+    Label {
         text: root.icon
         font.pixelSize: 40
         color: AppTheme.textFaint
-        anchors.horizontalCenter: parent.horizontalCenter
+        Layout.alignment: Qt.AlignHCenter
     }
-    Text {
+    Label {
         text: root.title
         font.pixelSize: AppTheme.fontTitle
         color: AppTheme.textDim
-        anchors.horizontalCenter: parent.horizontalCenter
+        Layout.alignment: Qt.AlignHCenter
     }
-    Text {
+    Label {
         text: root.hint
         font.pixelSize: AppTheme.fontSmall
         color: AppTheme.textFaint
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(360, parent ? parent.width : 360)
+        Layout.alignment: Qt.AlignHCenter
+        Layout.maximumWidth: 360
+        Layout.fillWidth: true
     }
     Button {
         visible: root.actionText !== ""
         text: root.actionText
-        anchors.horizontalCenter: parent.horizontalCenter
+        Layout.alignment: Qt.AlignHCenter
         onClicked: root.actionTriggered()
     }
 }

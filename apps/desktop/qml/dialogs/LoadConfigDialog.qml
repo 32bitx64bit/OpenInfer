@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Qt.labs.settings
+import QtCore
 import ".."
 import "../components"
 
@@ -37,13 +37,15 @@ Dialog {
         "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
         "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
         "rope_scaling": "", "alias": "", "raw_args": "",
-        "jinja": false, "no_mmproj_offload": false,
+        "jinja": false, "no_mmproj": false, "no_mmproj_offload": false,
+        "runtime_id": "",
         "save_on_success": true
     })
-    property string selectedRuntime: ""   // "" = auto
+    property string selectedRuntime: ""   // mirrors settings.runtime_id; "" = auto
     property var preview: null
     property var estimate: null
     property string loadError: ""
+    readonly property bool hasProjector: root.model && root.model.projector_path !== ""
 
     function isMultimodal(m) {
         if (!m) return false
@@ -63,12 +65,13 @@ Dialog {
             "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
             "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
             "rope_scaling": "", "alias": m.alias || "", "raw_args": "",
-            "jinja": root.isMultimodal(m), "no_mmproj_offload": false,
+            "jinja": root.isMultimodal(m), "no_mmproj": false, "no_mmproj_offload": false,
+            "runtime_id": m.pinned_runtime || "",
             "save_on_success": true
         }
         settings = next
         if (aliasField) aliasField.text = next.alias
-        selectedRuntime = m.pinned_runtime || ""
+        selectedRuntime = next.runtime_id
         loadError = ""
         preview = null
         estimate = null
@@ -103,6 +106,11 @@ Dialog {
             if (!root.settings.alias) {
                 root.setSetting("alias", m.alias || "")
                 if (aliasField) aliasField.text = m.alias || ""
+            }
+            // Keep runtime combo in sync with preset/pin.
+            root.selectedRuntime = root.settings.runtime_id || m.pinned_runtime || ""
+            if (root.settings.runtime_id === undefined || root.settings.runtime_id === null) {
+                root.setSetting("runtime_id", root.selectedRuntime)
             }
         })
         open()
@@ -140,10 +148,27 @@ Dialog {
             for (var k in incoming) s[k] = incoming[k]
             // Keep the library alias unless the preset explicitly set one.
             if (!s.alias && root.model) s.alias = root.model.alias || ""
+            if (s.runtime_id === undefined || s.runtime_id === null)
+                s.runtime_id = root.model ? (root.model.pinned_runtime || "") : ""
             root.settings = s
+            root.selectedRuntime = s.runtime_id || ""
             if (aliasField) aliasField.text = s.alias || ""
             scheduleRefresh()
         } catch (e) {}
+    }
+
+    function runtimeChoices() {
+        return [{ "id": "", "build": "Auto (preferred)", "backend": "", "architecture": "" }]
+            .concat(root.runtimes || [])
+    }
+
+    function runtimeIndex() {
+        var id = root.settings.runtime_id || root.selectedRuntime || ""
+        var m = root.runtimeChoices()
+        for (var i = 0; i < m.length; i++) {
+            if ((m[i].id || "") === id) return i
+        }
+        return 0
     }
 
     function maxCtx() {
@@ -211,18 +236,35 @@ Dialog {
                         }
                         ProgressBar {
                             Layout.fillWidth: true
+                            Layout.preferredHeight: 8
                             from: 0; to: 1
                             value: root.estimate && root.estimate.budget_bytes > 0
                                 ? Math.min(1, root.estimate.total_bytes / root.estimate.budget_bytes) : 0
                         }
                         Label {
                             Layout.fillWidth: true
-                            text: root.estimate
-                                ? "weights " + AppTheme.bytes(root.estimate.weights_bytes)
-                                  + " · KV cache " + AppTheme.bytes(root.estimate.kv_cache_bytes)
-                                  + " · compute " + AppTheme.bytes(root.estimate.compute_bytes)
-                                  + (root.estimate.note !== "" ? "  —  " + root.estimate.note : "")
-                                : ""
+                            text: {
+                                if (!root.estimate) return ""
+                                var e = root.estimate
+                                var parts = []
+                                parts.push("weights " + AppTheme.bytes(e.weights_bytes || 0))
+                                if ((e.projector_bytes || 0) > 0)
+                                    parts.push("mmproj " + AppTheme.bytes(e.projector_bytes))
+                                parts.push("KV " + AppTheme.bytes(e.kv_cache_bytes || 0))
+                                if ((e.recurrent_bytes || 0) > 0)
+                                    parts.push("recurrent " + AppTheme.bytes(e.recurrent_bytes))
+                                parts.push("compute " + AppTheme.bytes(e.compute_bytes || 0))
+                                if ((e.media_bytes || 0) > 0)
+                                    parts.push("media " + AppTheme.bytes(e.media_bytes))
+                                parts.push("overhead " + AppTheme.bytes(e.overhead_bytes || 0))
+                                var line = parts.join(" · ")
+                                if (e.gpu_bytes > 0 && e.cpu_bytes > 0)
+                                    line += "  |  GPU " + AppTheme.bytes(e.gpu_bytes)
+                                        + " · CPU " + AppTheme.bytes(e.cpu_bytes)
+                                if (e.note && e.note !== "")
+                                    line += "  —  " + e.note
+                                return line
+                            }
                             color: AppTheme.textFaint
                             font.pixelSize: AppTheme.fontSmall
                             wrapMode: Text.WordWrap
@@ -256,19 +298,20 @@ Dialog {
                     label: "Runtime"
                     hint: "llama.cpp build used for this model. Auto uses the pinned or preferred runtime."
                     ComboBox {
+                        id: runtimeCombo
                         width: parent.width
-                        model: [{ "id": "", "build": "Auto (preferred)", "backend": "", "architecture": "" }]
-                            .concat(root.runtimes)
+                        model: root.runtimeChoices()
                         textRole: "build"
-                        currentIndex: 0
+                        currentIndex: root.runtimeIndex()
                         onActivated: function(i) {
-                            root.selectedRuntime = model[i].id || ""
-                            root.scheduleRefresh()
+                            var id = model[i].id || ""
+                            root.selectedRuntime = id
+                            root.setSetting("runtime_id", id)
                         }
                         delegate: ItemDelegate {
                             text: modelData.id === "" ? modelData.build
                                 : modelData.build + " · " + modelData.backend + " · " + modelData.architecture
-                            width: parent.width
+                            width: parent ? parent.width : implicitWidth
                         }
                     }
                 }
@@ -423,12 +466,16 @@ Dialog {
                 FormField {
                     Layout.fillWidth: true
                     label: "Multimodal projector"
-                    hint: root.model && root.model.projector_path !== ""
-                          ? root.model.projector_path : "No projector paired with this model."
+                    hint: !root.hasProjector
+                          ? "No projector paired with this model."
+                          : (root.settings.no_mmproj
+                             ? "Paired projector will not be loaded."
+                             : root.model.projector_path)
                     argName: "--mmproj"
-                    supported: root.model ? root.model.projector_path !== "" : false
+                    supported: root.hasProjector && !root.settings.no_mmproj
                     Label {
-                        text: root.model && root.model.projector_path !== "" ? "Paired automatically" : "None"
+                        text: !root.hasProjector ? "None"
+                              : (root.settings.no_mmproj ? "Skipped" : "Paired automatically")
                         color: AppTheme.textDim
                     }
                 }
@@ -446,11 +493,13 @@ Dialog {
 
                 FormField {
                     Layout.fillWidth: true
-                    visible: root.model && root.model.projector_path !== ""
+                    visible: root.hasProjector
                     label: "Keep projector on CPU"
                     hint: "Disable GPU offload for the multimodal projector (saves VRAM)."
                     argName: "--no-mmproj-offload"
+                    supported: !root.settings.no_mmproj
                     Switch {
+                        enabled: !root.settings.no_mmproj
                         checked: !!root.settings.no_mmproj_offload
                         onToggled: root.setSetting("no_mmproj_offload", checked)
                     }
@@ -467,6 +516,20 @@ Dialog {
                     visible: advancedToggle.checked
                     spacing: AppTheme.gap
 
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Skip multimodal projector"
+                        hint: root.hasProjector
+                              ? "Load text-only: omit the paired vision/audio projector (saves memory)."
+                              : "Only available when a multimodal projector is paired with this model."
+                        argName: "--no-mmproj"
+                        supported: root.hasProjector
+                        Switch {
+                            enabled: root.hasProjector
+                            checked: !!root.settings.no_mmproj
+                            onToggled: root.setSetting("no_mmproj", checked)
+                        }
+                    }
                     FormField {
                         Layout.fillWidth: true
                         label: "Batch size"; argName: "--batch-size"

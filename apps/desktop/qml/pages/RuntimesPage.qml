@@ -149,6 +149,7 @@ Item {
                             }
                             ProgressBar {
                                 Layout.fillWidth: true
+                                Layout.preferredHeight: 8
                                 from: 0; to: 1
                                 value: {
                                     var live = page.liveProgress[modelData.id]
@@ -217,8 +218,9 @@ Item {
                                 }
                                 Label {
                                     text: modelData.platform + "/" + modelData.architecture
-                                        + " · installed " + modelData.installed_at.substring(0, 10)
-                                        + (modelData.used_by_models.length ? " · pinned by: " + modelData.used_by_models.join(", ") : "")
+                                        + " · installed " + (modelData.installed_at || "").substring(0, 10)
+                                        + ((modelData.used_by_models && modelData.used_by_models.length)
+                                            ? " · pinned by: " + modelData.used_by_models.join(", ") : "")
                                     color: AppTheme.textDim
                                     font.pixelSize: AppTheme.fontSmall
                                 }

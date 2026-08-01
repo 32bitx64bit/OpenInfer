@@ -273,7 +273,12 @@ func (l *Library) Scan() (int, error) {
 			"multimodal": multimodal, "has_vision": hasVision, "has_audio": hasAudio,
 			"version":     md.Version,
 			"block_count": md.BlockCount, "head_count": md.HeadCount,
-			"head_count_kv": md.HeadCountKV, "head_dim": md.HeadDim,
+			"head_count_kv": md.HeadCountKV, "head_count_kv_layers": md.HeadCountKVLayers,
+			"head_dim": md.HeadDim, "value_dim": md.ValueDim,
+			"head_dim_swa": md.HeadDimSWA, "value_dim_swa": md.ValueDimSWA,
+			"sliding_window": md.SlidingWindow, "sliding_window_pattern": md.SlidingWindowPattern,
+			"shared_kv_layers": md.SharedKVLayers, "full_attention_interval": md.FullAttentionInterval,
+			"ssm_state_size": md.SSMStateSize, "ssm_inner_size": md.SSMInnerSize,
 			"embedding_length": md.Embedding,
 			"tensor_errors":    tensorIssues,
 		})

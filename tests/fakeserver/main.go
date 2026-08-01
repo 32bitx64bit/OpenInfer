@@ -31,6 +31,7 @@ func main() {
 		threads  = fs.Int("threads", 4, "")
 		fa       = fs.Bool("flash-attn", false, "")
 		mmproj   = fs.String("mmproj", "", "")
+		noMmproj = fs.Bool("no-mmproj", false, "")
 		parallel = fs.Int("parallel", 1, "")
 		batch    = fs.Int("batch-size", 2048, "")
 		cacheK   = fs.String("cache-type-k", "", "")
@@ -47,6 +48,7 @@ func main() {
   -b,    --batch-size N
          --cache-type-k TYPE
          --mmproj FILE
+         --no-mmproj
          --host HOST
          --port PORT
          --api-key KEY
@@ -63,6 +65,7 @@ func main() {
 	_ = ngl
 	_ = ctxSize
 	_ = mmproj
+	_ = noMmproj
 
 	// Manual scan for --help since flag package treats it as error by default.
 	for _, a := range os.Args[1:] {

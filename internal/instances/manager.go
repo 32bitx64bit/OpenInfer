@@ -175,8 +175,16 @@ func (m *Manager) Touch(modelID string) {
 	}
 }
 
-// ResolveRuntime picks the runtime for a model: pin > global preferred.
-func (m *Manager) ResolveRuntime(modelID string) (*runtimes.Runtime, error) {
+// ResolveRuntime picks the runtime for a model:
+// explicit override > model pin > global preferred > any healthy install.
+func (m *Manager) ResolveRuntime(modelID, override string) (*runtimes.Runtime, error) {
+	if override != "" {
+		rt, err := m.runtimes.Get(override)
+		if err != nil {
+			return nil, fmt.Errorf("selected runtime %q: %w", override, err)
+		}
+		return rt, nil
+	}
 	mdl, err := m.library.Get(modelID)
 	if err != nil {
 		return nil, err
@@ -210,13 +218,16 @@ func (m *Manager) Preview(modelID string, s LoadSettings) (BuildResult, error) {
 	if err != nil {
 		return BuildResult{}, err
 	}
-	rt, err := m.ResolveRuntime(modelID)
+	rt, err := m.ResolveRuntime(modelID, s.RuntimeID)
 	if err != nil {
 		return BuildResult{}, err
 	}
 	help, _ := m.runtimes.HelpOutput(rt.ID)
 	br := BuildArgs(s, mdl.PrimaryPath, mdl.ProjectorPath, rt.Capabilities, help,
 		"127.0.0.1", 0, "<generated-per-process>")
+	br.Resolutions = append([]Resolution{{
+		Setting: "Runtime", Auto: s.RuntimeID, Resolved: rt.ID + " (" + rt.Backend + ")",
+	}}, br.Resolutions...)
 	return br, nil
 }
 
@@ -298,7 +309,7 @@ func (m *Manager) Start(modelID string, s LoadSettings) (*Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	rt, err := m.ResolveRuntime(modelID)
+	rt, err := m.ResolveRuntime(modelID, s.RuntimeID)
 	if err != nil {
 		return nil, err
 	}

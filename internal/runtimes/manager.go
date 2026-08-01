@@ -111,7 +111,13 @@ func (m *Manager) List() ([]Runtime, error) {
 		r.Preferred = pref == 1
 		r.Healthy = healthy == 1
 		r.Capabilities, _ = m.capabilities(r.ID)
+		if r.Capabilities == nil {
+			r.Capabilities = []string{}
+		}
 		r.UsedByModels, _ = m.usedBy(r.ID)
+		if r.UsedByModels == nil {
+			r.UsedByModels = []string{}
+		}
 		out = append(out, r)
 	}
 	return out, nil

@@ -15,36 +15,49 @@ import (
 const (
 	magicGGUF = 0x46554747 // "GGUF" little-endian
 
-	maxKVCount     = 1 << 20
-	maxTensorCount = 1 << 22
-	maxStringLen   = 16 << 20 // 16 MiB string cap
-	maxArrayLen    = 1 << 24  // element cap per array
-	maxVersion     = 3
-	minVersion     = 2
+	maxKVCount      = 1 << 20
+	maxTensorCount  = 1 << 22
+	maxStringLen    = 16 << 20 // 16 MiB string cap
+	maxArrayLen     = 1 << 24  // element cap per array
+	maxCaptureArray = 4096     // numeric/bool arrays retained for architecture metadata
+	maxVersion      = 3
+	minVersion      = 2
 )
 
 // Metadata is the extracted, UI-relevant subset of a GGUF header.
 type Metadata struct {
-	Version       uint32         `json:"version"`
-	TensorCount   uint64         `json:"tensor_count"`
-	Name          string         `json:"name,omitempty"`
-	Architecture  string         `json:"architecture,omitempty"`
-	FileType      uint32         `json:"file_type"`                // general.file_type
-	Quantization  string         `json:"quantization,omitempty"`   // resolved name of FileType
-	Parameters    uint64         `json:"parameters,omitempty"`     // general.parameter_count
-	ContextLength uint32         `json:"context_length,omitempty"` // <arch>.context_length
-	Embedding     uint32         `json:"embedding_length,omitempty"`
-	BlockCount    uint32         `json:"block_count,omitempty"`   // <arch>.block_count (layers)
-	HeadCount     uint32         `json:"head_count,omitempty"`    // attention heads
-	HeadCountKV   uint32         `json:"head_count_kv,omitempty"` // KV heads (GQA)
-	HeadDim       uint32         `json:"head_dim,omitempty"`      // derived: embedding / heads
-	ChatTemplate  string         `json:"chat_template,omitempty"`
-	Tokenizer     string         `json:"tokenizer,omitempty"`
-	Multimodal    bool           `json:"multimodal"`
-	HasVision     bool           `json:"has_vision"`
-	HasAudio      bool           `json:"has_audio"`
-	Projector     bool           `json:"projector"` // looks like an mmproj file
-	Raw           map[string]any `json:"-"`         // full kv for future use, not serialized to UI
+	Version           uint32   `json:"version"`
+	TensorCount       uint64   `json:"tensor_count"`
+	Name              string   `json:"name,omitempty"`
+	Architecture      string   `json:"architecture,omitempty"`
+	FileType          uint32   `json:"file_type"`                // general.file_type
+	Quantization      string   `json:"quantization,omitempty"`   // resolved name of FileType
+	Parameters        uint64   `json:"parameters,omitempty"`     // general.parameter_count
+	ContextLength     uint32   `json:"context_length,omitempty"` // <arch>.context_length
+	Embedding         uint32   `json:"embedding_length,omitempty"`
+	BlockCount        uint32   `json:"block_count,omitempty"`          // <arch>.block_count (layers)
+	HeadCount         uint32   `json:"head_count,omitempty"`           // attention heads
+	HeadCountKV       uint32   `json:"head_count_kv,omitempty"`        // KV heads (GQA); max if per-layer
+	HeadCountKVLayers []uint32 `json:"head_count_kv_layers,omitempty"` // per-layer KV heads (Gemma 4)
+	HeadDim           uint32   `json:"head_dim,omitempty"`             // key dim (derived or key_length)
+	ValueDim          uint32   `json:"value_dim,omitempty"`            // value dim when ≠ key
+	HeadDimSWA        uint32   `json:"head_dim_swa,omitempty"`         // SWA key dim
+	ValueDimSWA       uint32   `json:"value_dim_swa,omitempty"`        // SWA value dim
+	SlidingWindow     uint32   `json:"sliding_window,omitempty"`
+	// SlidingWindowPattern: true = sliding-window layer, false = full-context.
+	SlidingWindowPattern []bool `json:"sliding_window_pattern,omitempty"`
+	SharedKVLayers       uint32 `json:"shared_kv_layers,omitempty"` // trailing layers reuse KV
+	// FullAttentionInterval: hybrid models (Qwen3.5) — only every Nth layer has dense KV.
+	FullAttentionInterval uint32         `json:"full_attention_interval,omitempty"`
+	SSMStateSize          uint32         `json:"ssm_state_size,omitempty"`
+	SSMInnerSize          uint32         `json:"ssm_inner_size,omitempty"`
+	ChatTemplate          string         `json:"chat_template,omitempty"`
+	Tokenizer             string         `json:"tokenizer,omitempty"`
+	Multimodal            bool           `json:"multimodal"`
+	HasVision             bool           `json:"has_vision"`
+	HasAudio              bool           `json:"has_audio"`
+	Projector             bool           `json:"projector"` // looks like an mmproj file
+	Raw                   map[string]any `json:"-"`         // full kv for future use, not serialized to UI
 }
 
 // Errors that callers can classify.
@@ -184,6 +197,55 @@ func (r *reader) value(fileSize int64) any {
 			r.err = fmt.Errorf("unknown array element type %d", et)
 			return nil
 		}
+		// Keep small numeric/bool arrays (per-layer heads, SWA patterns).
+		if n <= maxCaptureArray {
+			switch et {
+			case tBool:
+				raw := make([]byte, n)
+				r.read(raw)
+				out := make([]bool, n)
+				for i, b := range raw {
+					out[i] = b != 0
+				}
+				return out
+			case tUint8, tInt8:
+				raw := make([]byte, n)
+				r.read(raw)
+				out := make([]uint32, n)
+				for i, b := range raw {
+					if et == tInt8 {
+						out[i] = uint32(int8(b))
+					} else {
+						out[i] = uint32(b)
+					}
+				}
+				return out
+			case tUint16, tInt16:
+				out := make([]uint32, n)
+				for i := uint64(0); i < n; i++ {
+					var b [2]byte
+					r.read(b[:])
+					v := binary.LittleEndian.Uint16(b[:])
+					if et == tInt16 {
+						out[i] = uint32(int16(v))
+					} else {
+						out[i] = uint32(v)
+					}
+				}
+				return out
+			case tUint32, tInt32:
+				out := make([]uint32, n)
+				for i := uint64(0); i < n; i++ {
+					v := r.u32()
+					if et == tInt32 {
+						out[i] = uint32(int32(v))
+					} else {
+						out[i] = v
+					}
+				}
+				return out
+			}
+		}
 		r.skip(sz*n, fileSize)
 		return nil
 	default:
@@ -321,7 +383,16 @@ func (md *Metadata) extract() {
 			}
 		}
 		if v, ok := get(md.Architecture + ".attention.head_count_kv"); ok {
-			if n, ok := toUint32(v); ok {
+			if layers, ok := toUint32Slice(v); ok && len(layers) > 0 {
+				md.HeadCountKVLayers = layers
+				var max uint32
+				for _, h := range layers {
+					if h > max {
+						max = h
+					}
+				}
+				md.HeadCountKV = max
+			} else if n, ok := toUint32(v); ok {
 				md.HeadCountKV = n
 			}
 		}
@@ -332,8 +403,56 @@ func (md *Metadata) extract() {
 			md.HeadDim = n
 		}
 	}
+	if v, ok := get(md.Architecture + ".attention.value_length"); ok {
+		if n, ok := toUint32(v); ok {
+			md.ValueDim = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".attention.key_length_swa"); ok {
+		if n, ok := toUint32(v); ok {
+			md.HeadDimSWA = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".attention.value_length_swa"); ok {
+		if n, ok := toUint32(v); ok {
+			md.ValueDimSWA = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".attention.sliding_window"); ok {
+		if n, ok := toUint32(v); ok {
+			md.SlidingWindow = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".attention.sliding_window_pattern"); ok {
+		if p, ok := toBoolSlice(v); ok {
+			md.SlidingWindowPattern = p
+		}
+	}
+	if v, ok := get(md.Architecture + ".attention.shared_kv_layers"); ok {
+		if n, ok := toUint32(v); ok {
+			md.SharedKVLayers = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".full_attention_interval"); ok {
+		if n, ok := toUint32(v); ok {
+			md.FullAttentionInterval = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".ssm.state_size"); ok {
+		if n, ok := toUint32(v); ok {
+			md.SSMStateSize = n
+		}
+	}
+	if v, ok := get(md.Architecture + ".ssm.inner_size"); ok {
+		if n, ok := toUint32(v); ok {
+			md.SSMInnerSize = n
+		}
+	}
 	if md.HeadDim == 0 && md.HeadCount > 0 && md.Embedding > 0 {
 		md.HeadDim = md.Embedding / md.HeadCount
+	}
+	if md.ValueDim == 0 {
+		md.ValueDim = md.HeadDim
 	}
 	if md.HeadCountKV == 0 {
 		md.HeadCountKV = md.HeadCount // MHA fallback
@@ -398,12 +517,63 @@ func toUint32(v any) (uint32, bool) {
 		if n >= 0 {
 			return uint32(n), true
 		}
+	case int:
+		if n >= 0 {
+			return uint32(n), true
+		}
 	case uint16:
 		return uint32(n), true
 	case uint8:
 		return uint32(n), true
 	}
 	return 0, false
+}
+
+func toUint32Slice(v any) ([]uint32, bool) {
+	switch a := v.(type) {
+	case []uint32:
+		if len(a) == 0 {
+			return nil, false
+		}
+		return a, true
+	case []any:
+		out := make([]uint32, 0, len(a))
+		for _, x := range a {
+			n, ok := toUint32(x)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, n)
+		}
+		return out, len(out) > 0
+	}
+	return nil, false
+}
+
+func toBoolSlice(v any) ([]bool, bool) {
+	switch a := v.(type) {
+	case []bool:
+		if len(a) == 0 {
+			return nil, false
+		}
+		return a, true
+	case []any:
+		out := make([]bool, len(a))
+		for i, x := range a {
+			switch b := x.(type) {
+			case bool:
+				out[i] = b
+			case uint8:
+				out[i] = b != 0
+			case uint32:
+				out[i] = b != 0
+			default:
+				return nil, false
+			}
+		}
+		return out, true
+	}
+	return nil, false
 }
 
 func toUint64(v any) (uint64, bool) {

@@ -35,6 +35,7 @@ var knownFlags = map[string]string{
 	"--kv-unified":           "kv-unified",
 	"--alias":                "alias",
 	"--mmproj":               "mmproj",
+	"--no-mmproj":            "no-mmproj",
 	"--no-mmproj-offload":    "no-mmproj-offload",
 	"--chat-template":        "chat-template",
 	"--chat-template-file":   "chat-template-file",

@@ -107,6 +107,7 @@ Item {
 
                     ProgressBar {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 8
                         from: 0; to: 1
                         value: {
                             var live = page.liveProgress[modelData.id]

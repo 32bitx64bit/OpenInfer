@@ -53,7 +53,7 @@ Events: `download.progress` (bytes, speed, ETA), `download.state_changed`.
 | Method & path | Purpose |
 |---|---|
 | POST `/models/{id}/preview` | resolved command, resolutions, warnings — nothing started |
-| POST `/models/{id}/estimate` | projected weights/KV/compute memory vs detected VRAM/RAM budget (estimate) |
+| POST `/models/{id}/estimate` | projected memory vs VRAM/RAM: weights, mmproj, KV (separate K/V dtypes), compute, media, overhead; GPU/CPU split when partial offload |
 | POST `/models/{id}/load` | start (LoadSettings JSON; all fields optional) |
 | POST `/models/{id}/unload[?force=1]` | graceful / forced stop |
 | POST `/models/{id}/restart` | reload with settings |

@@ -10,6 +10,7 @@ import (
 
 	"github.com/openinfer/openinfer-studio/internal/chat"
 	"github.com/openinfer/openinfer-studio/internal/diagnostics"
+	"github.com/openinfer/openinfer-studio/internal/gguf"
 	"github.com/openinfer/openinfer-studio/internal/instances"
 	"github.com/openinfer/openinfer-studio/internal/models"
 )
@@ -31,6 +32,11 @@ func (h *handlers) scanModels(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, 500, "scan failed", err)
 		return
+	}
+	// Manual rescan also marks metadata schema current so startup EnsureFresh
+	// does not immediately redo the same work.
+	if h.d.Settings != nil {
+		_ = h.d.Settings.Set("library.metadata_schema", models.MetadataSchemaVersion)
 	}
 	writeJSON(w, 200, map[string]any{"models": n})
 }
@@ -224,11 +230,54 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var meta struct {
-		BlockCount  uint32 `json:"block_count"`
-		HeadCountKV uint32 `json:"head_count_kv"`
-		HeadDim     uint32 `json:"head_dim"`
+		BlockCount            uint32   `json:"block_count"`
+		HeadCountKV           uint32   `json:"head_count_kv"`
+		HeadCountKVLayers     []uint32 `json:"head_count_kv_layers"`
+		HeadDim               uint32   `json:"head_dim"`
+		ValueDim              uint32   `json:"value_dim"`
+		HeadDimSWA            uint32   `json:"head_dim_swa"`
+		ValueDimSWA           uint32   `json:"value_dim_swa"`
+		SlidingWindow         uint32   `json:"sliding_window"`
+		SlidingWindowPattern  []bool   `json:"sliding_window_pattern"`
+		SharedKVLayers        uint32   `json:"shared_kv_layers"`
+		FullAttentionInterval uint32   `json:"full_attention_interval"`
+		SSMStateSize          uint32   `json:"ssm_state_size"`
+		SSMInnerSize          uint32   `json:"ssm_inner_size"`
+		EmbeddingLength       uint32   `json:"embedding_length"`
+		HasVision             bool     `json:"has_vision"`
+		HasAudio              bool     `json:"has_audio"`
 	}
 	_ = json.Unmarshal(m.Metadata, &meta)
+	// Prefer a live GGUF header parse for architecture/KV fields. Library
+	// metadata_json can lag behind parser improvements (SWA, hybrid, etc.).
+	if md, err := gguf.ParseFile(m.PrimaryPath); err == nil {
+		if md.BlockCount > 0 {
+			meta.BlockCount = md.BlockCount
+		}
+		if md.HeadCountKV > 0 {
+			meta.HeadCountKV = md.HeadCountKV
+		}
+		if len(md.HeadCountKVLayers) > 0 {
+			meta.HeadCountKVLayers = md.HeadCountKVLayers
+		}
+		if md.HeadDim > 0 {
+			meta.HeadDim = md.HeadDim
+		}
+		if md.ValueDim > 0 {
+			meta.ValueDim = md.ValueDim
+		}
+		meta.HeadDimSWA = md.HeadDimSWA
+		meta.ValueDimSWA = md.ValueDimSWA
+		meta.SlidingWindow = md.SlidingWindow
+		meta.SlidingWindowPattern = md.SlidingWindowPattern
+		meta.SharedKVLayers = md.SharedKVLayers
+		meta.FullAttentionInterval = md.FullAttentionInterval
+		meta.SSMStateSize = md.SSMStateSize
+		meta.SSMInnerSize = md.SSMInnerSize
+		if md.Embedding > 0 {
+			meta.EmbeddingLength = md.Embedding
+		}
+	}
 
 	hw := h.hardwareInfo()
 	var vram uint64
@@ -236,10 +285,6 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 		vram += g.VRAM
 	}
 	offload := s.GPUOffload != "none"
-	ctx := s.ContextLength
-	if ctx <= 0 {
-		ctx = 4096 // matches the UI default; 0 now means 4096
-	}
 	var proj int64
 	if m.ProjectorPath != "" {
 		if st, err := os.Stat(m.ProjectorPath); err == nil {
@@ -256,9 +301,25 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 	} else if !offload {
 		offloaded = 0
 	}
-	est := instances.EstimateMemory(m.SizeBytes-proj, proj, meta.BlockCount,
-		meta.HeadCountKV, meta.HeadDim, ctx, s.CacheTypeK, s.CacheTypeV,
-		s.Parallel, offload, offloaded, vram, hw.RAMAvailable)
+	est := instances.EstimateMemory(instances.EstimateInput{
+		Weights: m.SizeBytes - proj, Projector: proj,
+		Layers: meta.BlockCount, KVHeads: meta.HeadCountKV,
+		HeadCountKVLayers: meta.HeadCountKVLayers,
+		HeadDim:           meta.HeadDim, ValueDim: meta.ValueDim,
+		HeadDimSWA: meta.HeadDimSWA, ValueDimSWA: meta.ValueDimSWA,
+		SlidingWindow: meta.SlidingWindow, SlidingWindowPattern: meta.SlidingWindowPattern,
+		SharedKVLayers: meta.SharedKVLayers, FullAttentionInterval: meta.FullAttentionInterval,
+		SSMStateSize: meta.SSMStateSize, SSMInnerSize: meta.SSMInnerSize,
+		EmbeddingLength: meta.EmbeddingLength,
+		Ctx:             s.ContextLength, ModelContext: m.ContextLength,
+		CacheK: s.CacheTypeK, CacheV: s.CacheTypeV,
+		Slots: s.Parallel, BatchSize: s.BatchSize, UBatchSize: s.UBatchSize,
+		GPUOffload: offload, OffloadedLayers: offloaded,
+		VRAM: vram, RAM: hw.RAMAvailable,
+		HasVision: meta.HasVision, HasAudio: meta.HasAudio,
+		NoMmproj: s.NoMmproj, NoMmprojOffload: s.NoMmprojOffload,
+		FlashAttention: s.FlashAttention,
+	})
 	writeJSON(w, 200, est)
 }
 

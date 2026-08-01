@@ -33,6 +33,26 @@ func buildGGUF(t *testing.T, kvs map[string]any) []byte {
 		case float32:
 			w32(tFloat32)
 			binary.Write(&b, binary.LittleEndian, val)
+		case []bool:
+			w32(tArray)
+			w32(tBool)
+			w64(uint64(len(val)))
+			for _, x := range val {
+				if x {
+					b.WriteByte(1)
+				} else {
+					b.WriteByte(0)
+				}
+			}
+		case []uint32:
+			w32(tArray)
+			w32(tInt32) // gemma4 uses i32 for head_count_kv arrays
+			w64(uint64(len(val)))
+			for _, x := range val {
+				w32(x)
+			}
+		default:
+			t.Fatalf("unsupported kv type %T for %s", v, k)
 		}
 	}
 	return b.Bytes()
@@ -115,5 +135,61 @@ func TestParseHugeStringLength(t *testing.T) {
 	_, err := parse(bytes.NewReader(b.Bytes()), int64(b.Len()))
 	if err == nil {
 		t.Fatal("expected bounds error for oversized string")
+	}
+}
+
+func TestParseSlidingWindowMetadata(t *testing.T) {
+	pattern := []bool{true, true, true, true, true, false}
+	heads := []uint32{8, 8, 8, 8, 8, 1}
+	data := buildGGUF(t, map[string]any{
+		"general.architecture":                    "gemma4",
+		"gemma4.block_count":                      uint32(6),
+		"gemma4.embedding_length":                 uint32(3840),
+		"gemma4.attention.head_count":             uint32(16),
+		"gemma4.attention.head_count_kv":          heads,
+		"gemma4.attention.key_length":             uint32(512),
+		"gemma4.attention.value_length":           uint32(512),
+		"gemma4.attention.key_length_swa":         uint32(256),
+		"gemma4.attention.value_length_swa":       uint32(256),
+		"gemma4.attention.sliding_window":         uint32(1024),
+		"gemma4.attention.sliding_window_pattern": pattern,
+		"gemma4.attention.shared_kv_layers":       uint32(0),
+	})
+	md, err := parse(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.HeadCountKV != 8 {
+		t.Errorf("head_count_kv max = %d, want 8", md.HeadCountKV)
+	}
+	if len(md.HeadCountKVLayers) != 6 || md.HeadCountKVLayers[5] != 1 {
+		t.Errorf("per-layer kv heads = %v", md.HeadCountKVLayers)
+	}
+	if md.SlidingWindow != 1024 || md.HeadDimSWA != 256 {
+		t.Errorf("swa window/dim = %d/%d", md.SlidingWindow, md.HeadDimSWA)
+	}
+	if len(md.SlidingWindowPattern) != 6 || md.SlidingWindowPattern[5] {
+		t.Errorf("pattern = %v", md.SlidingWindowPattern)
+	}
+}
+
+func TestParseFullAttentionInterval(t *testing.T) {
+	data := buildGGUF(t, map[string]any{
+		"general.architecture":           "qwen35",
+		"qwen35.block_count":             uint32(24),
+		"qwen35.attention.head_count":    uint32(8),
+		"qwen35.attention.head_count_kv": uint32(2),
+		"qwen35.attention.key_length":    uint32(256),
+		"qwen35.full_attention_interval": uint32(4),
+		"qwen35.ssm.state_size":          uint32(128),
+		"qwen35.ssm.inner_size":          uint32(2048),
+	})
+	md, err := parse(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if md.FullAttentionInterval != 4 || md.SSMStateSize != 128 || md.SSMInnerSize != 2048 {
+		t.Errorf("hybrid meta = interval=%d state=%d inner=%d",
+			md.FullAttentionInterval, md.SSMStateSize, md.SSMInnerSize)
 	}
 }

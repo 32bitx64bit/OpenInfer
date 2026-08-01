@@ -101,6 +101,25 @@ func main() {
 	}
 
 	lib := models.NewLibrary(db.DB, layout.Models, hub, logs.Logger("models", slog.LevelInfo).Logger)
+	// Refresh library metadata when the parser schema bumped or on-disk
+	// GGUF files look newer than the DB. Runs in the background so readiness
+	// is not blocked; the UI reloads on library.scanned.
+	go func() {
+		stored := settings.Get("library.metadata_schema", "")
+		did, n, reason, err := lib.EnsureFresh(stored)
+		if err != nil {
+			log.Warn("startup library refresh failed", "err", err)
+			return
+		}
+		if !did {
+			log.Info("library metadata fresh", "schema", models.MetadataSchemaVersion)
+			return
+		}
+		if err := settings.Set("library.metadata_schema", models.MetadataSchemaVersion); err != nil {
+			log.Warn("saving library metadata schema failed", "err", err)
+		}
+		log.Info("library refreshed on startup", "models", n, "reason", reason)
+	}()
 	rt := runtimes.NewManager(db.DB, layout.Runtimes, dl, hub, logs.Logger("runtimes", slog.LevelInfo).Logger)
 	im := instances.NewManager(db.DB, rt, lib, hub, logs.Logger("instances", slog.LevelInfo).Logger,
 		layout.InstLogs, layout.Temp, layout.CacheDir)
@@ -134,6 +153,8 @@ func main() {
 			}
 			if _, err := lib.Scan(); err != nil {
 				log.Warn("post-download scan failed", "err", err)
+			} else {
+				_ = settings.Set("library.metadata_schema", models.MetadataSchemaVersion)
 			}
 		}
 	}()

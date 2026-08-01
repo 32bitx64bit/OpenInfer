@@ -79,8 +79,10 @@ int main(int argc, char *argv[])
     QGuiApplication::setOrganizationName(QStringLiteral("OpenInfer"));
     QGuiApplication::setApplicationVersion(QStringLiteral(OPENINFER_VERSION));
 
-    // Native styles (macOS/Windows) reject control customization used throughout
-    // the QML UI; Fusion is consistent and safe under offscreen CI too.
+    // Native styles (macOS/Windows) and Plasma's org.kde.breeze reject or
+    // mishandle control customization used throughout the QML UI. Force Fusion
+    // even when QT_QUICK_CONTROLS_STYLE is set in the environment.
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Fusion");
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     QGuiApplication app(argc, argv);
