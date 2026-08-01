@@ -30,8 +30,7 @@ jobs:
       - name: Backend self-test
         shell: bash
         run: |
-          go build -o /tmp/openinfer-core ./apps/core
-          /tmp/openinfer-core --selftest --token ci --data-dir /tmp/oi-ci | grep '"ready":true'
+          go run ./apps/core --selftest --token ci --data-dir ./oi-ci | grep '"ready":true'
 
   qt:
     name: Qt desktop (ubuntu)

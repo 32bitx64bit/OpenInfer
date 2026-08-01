@@ -1,0 +1,19 @@
+# Keep source as LF so gofmt/CI match across OSes.
+* text=auto eol=lf
+
+*.go   text eol=lf
+*.qml  text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.sh   text eol=lf
+*.sql  text eol=lf
+*.qrc  text eol=lf
+
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.ico  binary
