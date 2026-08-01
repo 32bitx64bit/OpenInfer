@@ -12,6 +12,7 @@
 #include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickStyle>
 #include <QRandomGenerator>
 #include <QTcpServer>
 #include <QTimer>
@@ -72,6 +73,10 @@ int main(int argc, char *argv[])
     QGuiApplication::setApplicationDisplayName(QStringLiteral("OpenInfer Studio"));
     QGuiApplication::setOrganizationName(QStringLiteral("OpenInfer"));
     QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    // Native styles (macOS/Windows) reject control customization used throughout
+    // the QML UI; Fusion is consistent and safe under offscreen CI too.
+    QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     QGuiApplication app(argc, argv);
 

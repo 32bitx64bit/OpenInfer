@@ -10,36 +10,50 @@ if [ -z "$APP" ] || [ ! -e "$APP" ]; then
   exit 2
 fi
 
-# Prefer offscreen; fall back to minimal if the plugin is missing.
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}"
+# Match the app's Fusion style; avoid native styles under headless CI.
+export QT_QUICK_CONTROLS_STYLE="${QT_QUICK_CONTROLS_STYLE:-Fusion}"
 export QT_LOGGING_RULES="${QT_LOGGING_RULES:-*.debug=false}"
 
-echo "==> smoke launching: $APP (platform=$QT_QPA_PLATFORM)"
-"$APP" >smoke-desktop.log 2>&1 &
-PID=$!
-
-cleanup() {
-  if kill -0 "$PID" 2>/dev/null; then
-    kill "$PID" 2>/dev/null || true
-    sleep 1
-    kill -9 "$PID" 2>/dev/null || true
-  fi
-  # Windows may need taskkill when bash kill does not reap the Win32 process.
-  if command -v taskkill >/dev/null 2>&1; then
-    taskkill //PID "$PID" //F //T >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
-
-# Give the bootstrap time to find the backend and become ready.
-sleep 8
-
-if ! kill -0 "$PID" 2>/dev/null; then
-  echo "==> app exited early; log:"
-  cat smoke-desktop.log || true
-  wait "$PID" || true
-  exit 1
+# Prefer offscreen. On Darwin, offscreen + Quick has historically been flaky;
+# try offscreen first, then minimal if the process dies immediately.
+platforms=("${QT_QPA_PLATFORM:-offscreen}")
+if [ "$(uname -s)" = "Darwin" ] && [ -z "${QT_QPA_PLATFORM:-}" ]; then
+  platforms=(offscreen minimal)
 fi
 
-echo "==> smoke ok (process still running after 8s)"
-exit 0
+smoke_once() {
+  local platform="$1"
+  export QT_QPA_PLATFORM="$platform"
+  rm -f smoke-desktop.log
+  echo "==> smoke launching: $APP (platform=$platform style=$QT_QUICK_CONTROLS_STYLE)"
+  "$APP" >smoke-desktop.log 2>&1 &
+  local pid=$!
+
+  # Give the bootstrap time to find the backend and become ready.
+  sleep 8
+
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "==> smoke ok (process still running after 8s)"
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
+    if command -v taskkill >/dev/null 2>&1; then
+      taskkill //PID "$pid" //F //T >/dev/null 2>&1 || true
+    fi
+    return 0
+  fi
+
+  echo "==> app exited early under platform=$platform; log:"
+  cat smoke-desktop.log || true
+  wait "$pid" 2>/dev/null || true
+  return 1
+}
+
+for p in "${platforms[@]}"; do
+  if smoke_once "$p"; then
+    exit 0
+  fi
+done
+
+echo "==> smoke failed on all platforms: ${platforms[*]}"
+exit 1

@@ -44,7 +44,7 @@ Dialog {
                 text: root.confirmText
                 highlighted: !root.destructive
                 onClicked: { root.confirmed(); root.close() }
-                palette.buttonText: root.destructive ? "white" : palette.buttonText
+                palette.buttonText: root.destructive ? "white" : AppTheme.onAccent
                 background: Rectangle {
                     radius: AppTheme.radiusSmall
                     color: root.destructive ? AppTheme.danger
