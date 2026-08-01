@@ -9,6 +9,7 @@ jobs:
   go:
     name: Go (backend tests, ${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -33,22 +34,148 @@ jobs:
           go run ./apps/core --selftest --token ci --data-dir ./oi-ci | grep '"ready":true'
 
   qt:
-    name: Qt desktop (ubuntu)
-    runs-on: ubuntu-latest
+    name: Qt desktop (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          - name: windows
+            os: windows-latest
+          - name: macos
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: jurplel/install-qt-action@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
         with:
           version: "6.8.*"
           modules: "qtwebsockets"
-      - name: Build desktop
-        run: |
-          cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openinfer-studio-linux-dev
-          path: build/openinfer-studio
+          arch: win64_msvc2022_64
+          cache: true
 
-  # Releases are produced only by an explicit tag-triggered workflow, never
-  # automatically from CI pushes.
+      - name: Install Qt (Unix)
+        if: runner.os != 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.*"
+          modules: "qtwebsockets"
+          cache: true
+
+      - name: MSVC developer command prompt
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install ninja -y
+
+      - name: Build backend
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            go build -trimpath -ldflags "-s -w" -o dist/openinfer-core.exe ./apps/core
+          else
+            go build -trimpath -ldflags "-s -w" -o dist/openinfer-core ./apps/core
+          fi
+
+      - name: Configure desktop
+        shell: bash
+        run: |
+          EXTRA=()
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            EXTRA+=(-G Ninja)
+          fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            EXTRA+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
+          fi
+          cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release "${EXTRA[@]}"
+
+      - name: Build desktop
+        shell: bash
+        run: |
+          JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu || echo 4)"
+          cmake --build build -j"$JOBS"
+
+      - name: Stage desktop binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Locate the built executable across generators / bundle layouts.
+          CANDIDATES=(
+            build/openinfer-studio
+            build/openinfer-studio.exe
+            build/Release/openinfer-studio.exe
+            build/openinfer-studio.app/Contents/MacOS/openinfer-studio
+          )
+          SRC=""
+          for c in "${CANDIDATES[@]}"; do
+            if [ -f "$c" ]; then SRC="$c"; break; fi
+          done
+          if [ -z "$SRC" ]; then
+            echo "desktop binary not found; build tree:"
+            find build -maxdepth 4 -type f -name 'openinfer-studio*' -print || true
+            exit 1
+          fi
+          echo "found desktop binary: $SRC"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "$SRC" dist/openinfer-studio.exe
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            # Keep .app layout when present so macdeployqt can process it.
+            if [ -d build/openinfer-studio.app ]; then
+              rm -rf dist/openinfer-studio.app
+              cp -R build/openinfer-studio.app dist/openinfer-studio.app
+              cp dist/openinfer-core dist/openinfer-studio.app/Contents/MacOS/openinfer-core
+            else
+              cp "$SRC" dist/openinfer-studio
+            fi
+          else
+            cp "$SRC" dist/openinfer-studio
+          fi
+
+      - name: Deploy Qt runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          windeployqt --qmldir apps/desktop/qml dist/openinfer-studio.exe
+
+      - name: Deploy Qt runtime (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ -d dist/openinfer-studio.app ]; then
+            macdeployqt dist/openinfer-studio.app -qmldir=apps/desktop/qml
+          fi
+
+      - name: Smoke launch desktop
+        shell: bash
+        run: |
+          chmod +x scripts/ci-smoke-desktop.sh
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./scripts/ci-smoke-desktop.sh dist/openinfer-studio.exe
+          elif [ "${{ runner.os }}" = "macOS" ] && [ -d dist/openinfer-studio.app ]; then
+            ./scripts/ci-smoke-desktop.sh dist/openinfer-studio.app/Contents/MacOS/openinfer-studio
+          else
+            ./scripts/ci-smoke-desktop.sh dist/openinfer-studio
+          fi
+
+      - name: Upload desktop artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openinfer-studio-${{ matrix.name }}
+          path: |
+            dist/
+            smoke-desktop.log
+          if-no-files-found: warn
