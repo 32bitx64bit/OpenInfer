@@ -1,0 +1,418 @@
+// Package models manages the local model library: scanning, GGUF metadata,
+// split/projector grouping, aliases, favorites, notes, presets, and files.
+package models
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/openinfer/openinfer-studio/internal/gguf"
+)
+
+var now = func() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+
+// Model is the library view of one logical model (possibly split).
+type Model struct {
+	ID            string          `json:"id"`
+	Alias         string          `json:"alias"`
+	Favorite      bool            `json:"favorite"`
+	Notes         string          `json:"notes"`
+	PrimaryPath   string          `json:"primary_path"`
+	ProjectorPath string          `json:"projector_path"`
+	SizeBytes     int64           `json:"size_bytes"`
+	Quantization  string          `json:"quantization"`
+	Architecture  string          `json:"architecture"`
+	Parameters    int64           `json:"parameters"`
+	ContextLength int             `json:"context_length"`
+	Metadata      json.RawMessage `json:"metadata"`
+	SourceRepo    string          `json:"source_repo"`
+	PinnedRuntime string          `json:"pinned_runtime"`
+	PinnedBackend string          `json:"pinned_backend"`
+	LastLoadedAt  string          `json:"last_loaded_at"`
+	LastRuntime   string          `json:"last_runtime"`
+	LastResult    string          `json:"last_result"`
+	Files         []string        `json:"files"` // all shards + projector
+	CreatedAt     string          `json:"created_at"`
+}
+
+type EventSink interface {
+	Publish(event string, payload any)
+}
+
+type Library struct {
+	db       *sql.DB
+	managed  string // managed models dir
+	log      *slog.Logger
+	events   EventSink
+	maxDepth int
+}
+
+func NewLibrary(db *sql.DB, managedDir string, events EventSink, log *slog.Logger) *Library {
+	return &Library{db: db, managed: managedDir, events: events, log: log, maxDepth: 6}
+}
+
+// Directories returns registered model directories (managed first).
+func (l *Library) Directories() ([]map[string]any, error) {
+	out := []map[string]any{{"id": "managed", "path": l.managed, "managed": true}}
+	rows, err := l.db.Query(`SELECT id, path FROM model_directories ORDER BY created_at`)
+	if err != nil {
+		return out, nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, p string
+		if rows.Scan(&id, &p) == nil {
+			out = append(out, map[string]any{"id": id, "path": p, "managed": false})
+		}
+	}
+	return out, nil
+}
+
+// AddDirectory registers an extra model directory.
+func (l *Library) AddDirectory(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	st, err := os.Stat(abs)
+	if err != nil || !st.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", abs)
+	}
+	id := uuid.NewString()
+	_, err = l.db.Exec(`INSERT INTO model_directories(id,path,managed,created_at) VALUES (?,?,0,?)`, id, abs, now())
+	return id, err
+}
+
+// RemoveDirectory unregisters a directory (files are never deleted).
+func (l *Library) RemoveDirectory(id string) error {
+	_, err := l.db.Exec(`DELETE FROM model_directories WHERE id = ?`, id)
+	return err
+}
+
+var splitSuffix = regexp.MustCompile(`(?i)-\d{5}-of-\d{5}\.gguf$`)
+
+// Scan walks all registered directories, parses GGUF headers, groups split
+// sets and pairs projectors, and upserts the library.
+func (l *Library) Scan() (int, error) {
+	dirs, err := l.Directories()
+	if err != nil {
+		return 0, err
+	}
+	type found struct {
+		path string
+		size int64
+	}
+	var ggufs []found
+	for _, d := range dirs {
+		root := d["path"].(string)
+		baseDepth := strings.Count(filepath.Clean(root), string(os.PathSeparator))
+		_ = filepath.WalkDir(root, func(p string, e os.DirEntry, err error) error {
+			if err != nil {
+				return nil // unreadable entries are skipped, never fatal
+			}
+			depth := strings.Count(filepath.Clean(p), string(os.PathSeparator)) - baseDepth
+			if e.IsDir() {
+				if depth > l.maxDepth {
+					return filepath.SkipDir
+				}
+				// Skip hidden dirs and our own partial trees.
+				if strings.HasPrefix(e.Name(), ".") && depth > 0 {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(strings.ToLower(e.Name()), ".gguf") {
+				if st, err := e.Info(); err == nil {
+					ggufs = append(ggufs, found{p, st.Size()})
+				}
+			}
+			return nil
+		})
+	}
+
+	// Group by model stem (split sets share a stem).
+	groups := map[string][]found{}
+	projectors := map[string]found{} // by directory
+	for _, g := range ggufs {
+		lower := strings.ToLower(filepath.Base(g.path))
+		if strings.Contains(lower, "mmproj") || strings.Contains(lower, "mm-proj") {
+			projectors[filepath.Dir(g.path)] = g
+			continue
+		}
+		stem := g.path
+		if splitSuffix.MatchString(stem) {
+			stem = splitSuffix.ReplaceAllString(stem, "")
+		} else {
+			stem = strings.TrimSuffix(stem, ".gguf")
+		}
+		groups[stem] = append(groups[stem], g)
+	}
+
+	count := 0
+	for stem, files := range groups {
+		sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
+		primary := files[0].path
+		// Full validation: header metadata + tensor-table integrity. Files
+		// with tensor errors are kept in the library but flagged, so the user
+		// sees the problem before attempting a load.
+		tensorIssues, md, err := gguf.ValidateFile(primary)
+		if err != nil {
+			l.log.Warn("skipping unreadable gguf", "path", primary, "err", err)
+			continue
+		}
+		if len(tensorIssues) > 0 {
+			l.log.Warn("gguf tensor validation failed", "path", primary, "issues", tensorIssues)
+		}
+		var total int64
+		for _, f := range files {
+			total += f.size
+		}
+		var proj string
+		if p, ok := projectors[filepath.Dir(primary)]; ok {
+			proj = p.path
+			total += p.size
+		}
+		metaJSON, _ := json.Marshal(map[string]any{
+			"name": md.Name, "tokenizer": md.Tokenizer,
+			"multimodal": md.Multimodal, "version": md.Version,
+			"block_count": md.BlockCount, "head_count": md.HeadCount,
+			"head_count_kv": md.HeadCountKV, "head_dim": md.HeadDim,
+			"embedding_length": md.Embedding,
+			"tensor_errors":    tensorIssues,
+		})
+		id := stableID(primary)
+		alias := md.Name
+		if alias == "" {
+			alias = filepath.Base(stem)
+		}
+		_, err = l.db.Exec(`INSERT INTO models
+			(id,alias,primary_path,projector_path,size_bytes,quantization,architecture,parameters,
+			 context_length,metadata_json,created_at,updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(id) DO UPDATE SET
+			 primary_path=excluded.primary_path, projector_path=excluded.projector_path,
+			 size_bytes=excluded.size_bytes, quantization=excluded.quantization,
+			 architecture=excluded.architecture, parameters=excluded.parameters,
+			 context_length=excluded.context_length, metadata_json=excluded.metadata_json,
+			 updated_at=excluded.updated_at`,
+			id, alias, primary, proj, total, md.Quantization, md.Architecture,
+			int64(md.Parameters), int(md.ContextLength), string(metaJSON), now(), now())
+		if err != nil {
+			l.log.Warn("upsert model failed", "path", primary, "err", err)
+			continue
+		}
+		_, _ = l.db.Exec(`DELETE FROM model_files WHERE model_id = ?`, id)
+		for i, f := range files {
+			role := "shard"
+			if i == 0 {
+				role = "primary"
+			}
+			_, _ = l.db.Exec(`INSERT INTO model_files(id,model_id,path,role,size_bytes) VALUES (?,?,?,?,?)`,
+				uuid.NewString(), id, f.path, role, f.size)
+		}
+		if proj != "" {
+			_, _ = l.db.Exec(`INSERT INTO model_files(id,model_id,path,role,size_bytes) VALUES (?,?,?,'projector',?)`,
+				uuid.NewString(), id, proj, projectors[filepath.Dir(primary)].size)
+		}
+		count++
+	}
+
+	// Remove DB rows whose primary file vanished.
+	rows, err := l.db.Query(`SELECT id, primary_path FROM models`)
+	if err == nil {
+		defer rows.Close()
+		type row struct{ id, p string }
+		var stale []row
+		for rows.Next() {
+			var r row
+			if rows.Scan(&r.id, &r.p) == nil {
+				if _, err := os.Stat(r.p); os.IsNotExist(err) {
+					stale = append(stale, r)
+				}
+			}
+		}
+		for _, s := range stale {
+			_, _ = l.db.Exec(`DELETE FROM models WHERE id = ?`, s.id)
+		}
+	}
+
+	if l.events != nil {
+		l.events.Publish("library.scanned", map[string]any{"models": count})
+	}
+	return count, nil
+}
+
+// stableID derives a collision-resistant ID from the path (stable across
+// rescans, so settings survive).
+func stableID(path string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("openinfer-model:"+filepath.Clean(path))).String()
+}
+
+// List returns all models, favorites first.
+func (l *Library) List() ([]Model, error) {
+	rows, err := l.db.Query(`SELECT id,alias,favorite,notes,primary_path,projector_path,size_bytes,
+		quantization,architecture,parameters,context_length,metadata_json,source_repo,
+		pinned_runtime,pinned_backend,last_loaded_at,last_runtime,last_result,created_at
+		FROM models ORDER BY favorite DESC, alias COLLATE NOCASE`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Model
+	for rows.Next() {
+		var m Model
+		var fav int
+		var meta string
+		if err := rows.Scan(&m.ID, &m.Alias, &fav, &m.Notes, &m.PrimaryPath, &m.ProjectorPath,
+			&m.SizeBytes, &m.Quantization, &m.Architecture, &m.Parameters, &m.ContextLength,
+			&meta, &m.SourceRepo, &m.PinnedRuntime, &m.PinnedBackend, &m.LastLoadedAt,
+			&m.LastRuntime, &m.LastResult, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		m.Favorite = fav == 1
+		m.Metadata = json.RawMessage(meta)
+		out = append(out, m)
+	}
+	for i := range out {
+		fs, _ := l.filesOf(out[i].ID)
+		out[i].Files = fs
+	}
+	return out, nil
+}
+
+// Get returns one model.
+func (l *Library) Get(id string) (*Model, error) {
+	all, err := l.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if all[i].ID == id {
+			return &all[i], nil
+		}
+	}
+	return nil, fmt.Errorf("model %s not found", id)
+}
+
+func (l *Library) filesOf(id string) ([]string, error) {
+	rows, err := l.db.Query(`SELECT path FROM model_files WHERE model_id = ? ORDER BY rowid`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// Update edits mutable model fields.
+func (l *Library) Update(id string, alias *string, favorite *bool, notes *string,
+	pinnedRuntime *string, pinnedBackend *string) error {
+	m, err := l.Get(id)
+	if err != nil {
+		return err
+	}
+	if alias == nil {
+		alias = &m.Alias
+	}
+	fav := m.Favorite
+	if favorite != nil {
+		fav = *favorite
+	}
+	if notes == nil {
+		notes = &m.Notes
+	}
+	if pinnedRuntime == nil {
+		pinnedRuntime = &m.PinnedRuntime
+	}
+	if pinnedBackend == nil {
+		pinnedBackend = &m.PinnedBackend
+	}
+	fi := 0
+	if fav {
+		fi = 1
+	}
+	_, err = l.db.Exec(`UPDATE models SET alias=?, favorite=?, notes=?, pinned_runtime=?,
+		pinned_backend=?, updated_at=? WHERE id=?`,
+		*alias, fi, *notes, *pinnedRuntime, *pinnedBackend, now(), id)
+	return err
+}
+
+// RecordLoad stores the outcome of a load attempt.
+func (l *Library) RecordLoad(id, runtimeID, result string) {
+	_, _ = l.db.Exec(`UPDATE models SET last_loaded_at=?, last_runtime=?, last_result=? WHERE id=?`,
+		now(), runtimeID, result, id)
+	_, _ = l.db.Exec(`INSERT INTO model_runtime_history(id,model_id,runtime_id,result,created_at)
+		VALUES (?,?,?,?,?)`, uuid.NewString(), id, runtimeID, result, now())
+}
+
+// Delete removes a model from the library. When deleteFiles is true, files
+// are removed only if they live inside the managed models directory — the
+// API layer confirms with the user and passes the exact paths first.
+func (l *Library) Delete(id string, deleteFiles bool) ([]string, error) {
+	m, err := l.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	removed := []string{}
+	if deleteFiles {
+		managedClean := filepath.Clean(l.managed)
+		for _, f := range m.Files {
+			cf := filepath.Clean(f)
+			if !strings.HasPrefix(cf, managedClean+string(os.PathSeparator)) {
+				return removed, fmt.Errorf("refusing to delete file outside managed directory: %s", cf)
+			}
+		}
+		for _, f := range m.Files {
+			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+				return removed, fmt.Errorf("deleting %s: %w", f, err)
+			}
+			removed = append(removed, f)
+		}
+	}
+	_, err = l.db.Exec(`DELETE FROM models WHERE id = ?`, id)
+	return removed, err
+}
+
+// ImportFile registers an existing GGUF file without moving it.
+func (l *Library) ImportFile(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := gguf.ParseFile(abs); err != nil {
+		return "", fmt.Errorf("not a readable GGUF model: %w", err)
+	}
+	dir := filepath.Dir(abs)
+	// Register the containing directory (idempotent) and rescan.
+	dirs, _ := l.Directories()
+	known := false
+	for _, d := range dirs {
+		if d["path"].(string) == dir {
+			known = true
+		}
+	}
+	if !known {
+		if _, err := l.AddDirectory(dir); err != nil && !strings.Contains(err.Error(), "UNIQUE") {
+			return "", err
+		}
+	}
+	if _, err := l.Scan(); err != nil {
+		return "", err
+	}
+	return stableID(abs), nil
+}

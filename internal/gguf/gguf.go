@@ -1,0 +1,403 @@
+// Package gguf reads GGUF metadata with bounded allocations. It validates
+// magic/version and does not load tensor payloads into memory.
+package gguf
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+)
+
+const (
+	magicGGUF = 0x46554747 // "GGUF" little-endian
+
+	maxKVCount     = 1 << 20
+	maxTensorCount = 1 << 22
+	maxStringLen   = 16 << 20 // 16 MiB string cap
+	maxArrayLen    = 1 << 24  // element cap per array
+	maxVersion     = 3
+	minVersion     = 2
+)
+
+// Metadata is the extracted, UI-relevant subset of a GGUF header.
+type Metadata struct {
+	Version       uint32         `json:"version"`
+	TensorCount   uint64         `json:"tensor_count"`
+	Name          string         `json:"name,omitempty"`
+	Architecture  string         `json:"architecture,omitempty"`
+	FileType      uint32         `json:"file_type"`                // general.file_type
+	Quantization  string         `json:"quantization,omitempty"`   // resolved name of FileType
+	Parameters    uint64         `json:"parameters,omitempty"`     // general.parameter_count
+	ContextLength uint32         `json:"context_length,omitempty"` // <arch>.context_length
+	Embedding     uint32         `json:"embedding_length,omitempty"`
+	BlockCount    uint32         `json:"block_count,omitempty"`   // <arch>.block_count (layers)
+	HeadCount     uint32         `json:"head_count,omitempty"`    // attention heads
+	HeadCountKV   uint32         `json:"head_count_kv,omitempty"` // KV heads (GQA)
+	HeadDim       uint32         `json:"head_dim,omitempty"`      // derived: embedding / heads
+	ChatTemplate  string         `json:"chat_template,omitempty"`
+	Tokenizer     string         `json:"tokenizer,omitempty"`
+	Multimodal    bool           `json:"multimodal"`
+	Projector     bool           `json:"projector"` // looks like an mmproj file
+	Raw           map[string]any `json:"-"`         // full kv for future use, not serialized to UI
+}
+
+// Errors that callers can classify.
+var (
+	ErrBadMagic     = errors.New("not a GGUF file (bad magic)")
+	ErrBadVersion   = errors.New("unsupported GGUF version")
+	ErrTruncated    = errors.New("truncated GGUF header")
+	ErrBoundsUnsafe = errors.New("declared size exceeds safety bound")
+)
+
+// Known llama.cpp file-type → quantization label (subset; unknown → "").
+var fileTypeNames = map[uint32]string{
+	0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0",
+	8: "Q5_0", 9: "Q5_1", 10: "Q2_K", 11: "Q3_K_S", 12: "Q3_K_M", 13: "Q3_K_L",
+	14: "Q4_K_S", 15: "Q4_K_M", 16: "Q5_K_S", 17: "Q5_K_M", 18: "Q6_K",
+	19: "IQ2_XXS", 20: "IQ2_XS", 21: "Q2_K_S", 22: "IQ3_XS", 23: "IQ3_XXS",
+	24: "IQ1_S", 25: "IQ4_NL", 26: "IQ3_S", 27: "IQ3_M", 28: "IQ2_S",
+	29: "IQ2_M", 30: "IQ4_XS", 31: "IQ1_M", 32: "BF16",
+	34: "TQ1_0", 35: "TQ2_0", 36: "MXFP4",
+}
+
+// reader wraps io.ReaderAt with a hard cursor and error stickiness.
+type reader struct {
+	r   io.ReaderAt
+	off int64
+	err error
+}
+
+func (r *reader) read(p []byte) {
+	if r.err != nil {
+		return
+	}
+	n, err := r.r.ReadAt(p, r.off)
+	r.off += int64(n)
+	if err != nil {
+		r.err = ErrTruncated
+	}
+}
+
+func (r *reader) u32() uint32 {
+	var b [4]byte
+	r.read(b[:])
+	return binary.LittleEndian.Uint32(b[:])
+}
+
+func (r *reader) u64() uint64 {
+	var b [8]byte
+	r.read(b[:])
+	return binary.LittleEndian.Uint64(b[:])
+}
+
+func (r *reader) str() string {
+	n := r.u64()
+	if r.err != nil {
+		return ""
+	}
+	if n > maxStringLen {
+		r.err = fmt.Errorf("%w: string length %d", ErrBoundsUnsafe, n)
+		return ""
+	}
+	buf := make([]byte, n)
+	r.read(buf)
+	return string(buf)
+}
+
+// skip advances the cursor n bytes (bounds-checked against remaining file).
+func (r *reader) skip(n uint64, fileSize int64) {
+	if r.err != nil {
+		return
+	}
+	if n > math.MaxInt64 || r.off+int64(n) > fileSize {
+		r.err = ErrTruncated
+		return
+	}
+	r.off += int64(n)
+}
+
+// value type tags
+const (
+	tUint8, tInt8, tUint16, tInt16   = 0, 1, 2, 3
+	tUint32, tInt32, tFloat32, tBool = 4, 5, 6, 7
+	tString, tArray, tUint64, tInt64 = 8, 9, 10, 11
+	tFloat64                         = 12
+)
+
+func fixedSize(t uint32) (uint64, bool) {
+	switch t {
+	case tUint8, tInt8, tBool:
+		return 1, true
+	case tUint16, tInt16:
+		return 2, true
+	case tUint32, tInt32, tFloat32:
+		return 4, true
+	case tUint64, tInt64, tFloat64:
+		return 8, true
+	}
+	return 0, false
+}
+
+// value reads one metadata value; strings and small scalar arrays are
+// captured, everything else is skipped.
+func (r *reader) value(fileSize int64) any {
+	t := r.u32()
+	if r.err != nil {
+		return nil
+	}
+	switch t {
+	case tString:
+		return r.str()
+	case tArray:
+		et := r.u32()
+		n := r.u64()
+		if r.err != nil {
+			return nil
+		}
+		if n > maxArrayLen {
+			r.err = fmt.Errorf("%w: array length %d", ErrBoundsUnsafe, n)
+			return nil
+		}
+		if et == tString {
+			// Read up to 64 strings for inspection, skip the rest.
+			out := make([]string, 0, 8)
+			var i uint64
+			for ; i < n; i++ {
+				s := r.str()
+				if r.err != nil {
+					return nil
+				}
+				if i < 64 {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+		sz, ok := fixedSize(et)
+		if !ok {
+			r.err = fmt.Errorf("unknown array element type %d", et)
+			return nil
+		}
+		r.skip(sz*n, fileSize)
+		return nil
+	default:
+		switch t {
+		case tUint8:
+			var b [1]byte
+			r.read(b[:])
+			return uint8(b[0])
+		case tInt8:
+			var b [1]byte
+			r.read(b[:])
+			return int8(b[0])
+		case tUint16:
+			var b [2]byte
+			r.read(b[:])
+			return binary.LittleEndian.Uint16(b[:])
+		case tInt16:
+			var b [2]byte
+			r.read(b[:])
+			return int16(binary.LittleEndian.Uint16(b[:]))
+		case tUint32:
+			return r.u32()
+		case tInt32:
+			return int32(r.u32())
+		case tFloat32:
+			return math.Float32frombits(r.u32())
+		case tBool:
+			var b [1]byte
+			r.read(b[:])
+			return b[0] != 0
+		case tUint64:
+			return r.u64()
+		case tInt64:
+			return int64(r.u64())
+		case tFloat64:
+			return math.Float64frombits(r.u64())
+		}
+		r.err = fmt.Errorf("unknown value type %d", t)
+		return nil
+	}
+}
+
+// ParseFile reads the GGUF header of path. It opens, validates and closes the
+// file; tensor payloads are never touched.
+func ParseFile(path string) (*Metadata, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return parse(f, st.Size())
+}
+
+func parse(ra io.ReaderAt, fileSize int64) (*Metadata, error) {
+	r := &reader{r: ra}
+	if magic := r.u32(); magic != magicGGUF {
+		return nil, ErrBadMagic
+	}
+	version := r.u32()
+	if r.err != nil {
+		return nil, r.err
+	}
+	if version < minVersion || version > maxVersion {
+		return nil, fmt.Errorf("%w: %d", ErrBadVersion, version)
+	}
+	tensors := r.u64()
+	kvCount := r.u64()
+	if r.err != nil {
+		return nil, r.err
+	}
+	if tensors > maxTensorCount || kvCount > maxKVCount {
+		return nil, fmt.Errorf("%w: tensors=%d kv=%d", ErrBoundsUnsafe, tensors, kvCount)
+	}
+
+	md := &Metadata{Version: version, TensorCount: tensors, Raw: map[string]any{}}
+	for i := uint64(0); i < kvCount; i++ {
+		key := r.str()
+		val := r.value(fileSize)
+		if r.err != nil {
+			return nil, r.err
+		}
+		md.Raw[key] = val
+	}
+	md.extract()
+	return md, nil
+}
+
+// extract lifts well-known keys into typed fields.
+func (md *Metadata) extract() {
+	get := func(k string) (any, bool) { v, ok := md.Raw[k]; return v, ok }
+	if v, ok := get("general.name"); ok {
+		if s, ok := v.(string); ok {
+			md.Name = s
+		}
+	}
+	if v, ok := get("general.architecture"); ok {
+		if s, ok := v.(string); ok {
+			md.Architecture = s
+		}
+	}
+	if v, ok := get("general.file_type"); ok {
+		if n, ok := toUint32(v); ok {
+			md.FileType = n
+			md.Quantization = fileTypeNames[n]
+		}
+	}
+	if v, ok := get("general.parameter_count"); ok {
+		if n, ok := toUint64(v); ok {
+			md.Parameters = n
+		}
+	}
+	if md.Architecture != "" {
+		if v, ok := get(md.Architecture + ".context_length"); ok {
+			if n, ok := toUint32(v); ok {
+				md.ContextLength = n
+			}
+		}
+		if v, ok := get(md.Architecture + ".embedding_length"); ok {
+			if n, ok := toUint32(v); ok {
+				md.Embedding = n
+			}
+		}
+		if v, ok := get(md.Architecture + ".block_count"); ok {
+			if n, ok := toUint32(v); ok {
+				md.BlockCount = n
+			}
+		}
+		if v, ok := get(md.Architecture + ".attention.head_count"); ok {
+			if n, ok := toUint32(v); ok {
+				md.HeadCount = n
+			}
+		}
+		if v, ok := get(md.Architecture + ".attention.head_count_kv"); ok {
+			if n, ok := toUint32(v); ok {
+				md.HeadCountKV = n
+			}
+		}
+	}
+	// Head dimension: explicit key wins, else derive from embedding / heads.
+	if v, ok := get(md.Architecture + ".attention.key_length"); ok {
+		if n, ok := toUint32(v); ok {
+			md.HeadDim = n
+		}
+	}
+	if md.HeadDim == 0 && md.HeadCount > 0 && md.Embedding > 0 {
+		md.HeadDim = md.Embedding / md.HeadCount
+	}
+	if md.HeadCountKV == 0 {
+		md.HeadCountKV = md.HeadCount // MHA fallback
+	}
+	if v, ok := get("tokenizer.chat_template"); ok {
+		if s, ok := v.(string); ok {
+			md.ChatTemplate = s
+		}
+	}
+	if v, ok := get("tokenizer.ggml.model"); ok {
+		if s, ok := v.(string); ok {
+			md.Tokenizer = s
+		}
+	}
+	// Multimodal indicators.
+	for k := range md.Raw {
+		switch k {
+		case "clip.vision.patch_size", "clip.has_vision_encoder",
+			"gemma3.mm.scale_emb", "audio.block_count":
+			md.Multimodal = true
+		}
+	}
+	if _, ok := md.Raw["clip.has_vision_encoder"]; ok {
+		if md.Architecture == "clip" || md.Name == "" {
+			md.Projector = md.Architecture == "clip"
+		}
+	}
+	if md.Architecture == "clip" {
+		md.Projector = true
+	}
+	if !md.Projector && md.Multimodal {
+		md.Multimodal = true
+	}
+}
+
+func toUint32(v any) (uint32, bool) {
+	switch n := v.(type) {
+	case uint32:
+		return n, true
+	case uint64:
+		if n <= math.MaxUint32 {
+			return uint32(n), true
+		}
+	case int32:
+		if n >= 0 {
+			return uint32(n), true
+		}
+	case uint16:
+		return uint32(n), true
+	case uint8:
+		return uint32(n), true
+	}
+	return 0, false
+}
+
+func toUint64(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case uint64:
+		return n, true
+	case uint32:
+		return uint64(n), true
+	case int64:
+		if n >= 0 {
+			return uint64(n), true
+		}
+	case uint8:
+		return uint64(n), true
+	}
+	return 0, false
+}

@@ -1,0 +1,101 @@
+# Control API
+
+Base: `http://127.0.0.1:<port>/api/v1` — loopback only. Every request needs
+`Authorization: Bearer <session-token>`; the WebSocket
+(`GET /api/v1/events`) takes `{"token":"…"}` as its first frame.
+
+Errors: `{"error": "message", "detail": "debug detail"}`.
+
+## Core
+
+| Method & path | Purpose |
+|---|---|
+| GET `/status` | app version, data dir |
+| GET `/hardware[?refresh=1]` | detected hardware + backend recommendation |
+| GET `/settings` / PUT `/settings/{key}` | key-value settings (`{"value":"…"}`) |
+| GET `/logs/files`, GET `/logs/tail?name=` | log files, redacted tails |
+
+## Hugging Face
+
+| Method & path | Purpose |
+|---|---|
+| GET `/hf/search?q=&sort=&limit=` | GGUF repo search (sort: downloads, likes, trending, lastModified) |
+| GET `/hf/repo/{author}/{name}` | repo detail + grouped file sets + model card |
+| GET/PUT/DELETE `/hf/token` | token status / store in OS keychain / remove |
+
+## Downloads
+
+| Method & path | Purpose |
+|---|---|
+| GET `/downloads` | queue with per-file progress |
+| POST `/downloads` | enqueue `{kind,label,repo,group,files:[{path,size,url?}]}` |
+| POST `/downloads/{id}/pause|resume|cancel|retry` | control |
+| POST `/downloads/{id}/reorder` | `{"position":n}` |
+| DELETE `/downloads/{id}` | remove record + partials |
+
+Events: `download.progress` (bytes, speed, ETA), `download.state_changed`.
+
+## Library & models
+
+| Method & path | Purpose |
+|---|---|
+| GET `/models` | all models (favorites first) |
+| POST `/models/scan` | rescan registered directories |
+| POST `/models/import` | `{"path": "/…/file.gguf"}` sideload |
+| GET `/models/{id}` | model + presets + live instance |
+| PATCH `/models/{id}` | alias, favorite, notes, pinned_runtime, pinned_backend |
+| DELETE `/models/{id}` | two-phase: first call returns `paths`; re-call with `?confirmed=1&delete_files=1` |
+| GET/POST `/models/{id}/presets`, PUT/DELETE `…/presets/{pid}` | load presets |
+| GET/POST/DELETE `/directories[/{id}]` | extra model directories |
+
+## Loading & instances
+
+| Method & path | Purpose |
+|---|---|
+| POST `/models/{id}/preview` | resolved command, resolutions, warnings — nothing started |
+| POST `/models/{id}/estimate` | projected weights/KV/compute memory vs detected VRAM/RAM budget (estimate) |
+| POST `/models/{id}/load` | start (LoadSettings JSON; all fields optional) |
+| POST `/models/{id}/unload[?force=1]` | graceful / forced stop |
+| POST `/models/{id}/restart` | reload with settings |
+| GET `/models/{id}/logs` | redacted log tail |
+| GET `/models/{id}/activity` | latest `/slots` snapshot (busy, tokens, tok/s) |
+| GET `/models/{id}/diagnostics[?redact_home=1]` | full failure report |
+| GET `/instances` | live instances with state machine state |
+
+Events: `instance.state_changed`, `instance.updated`, `instance.activity`,
+`instance.log`.
+
+## Runtimes
+
+| Method & path | Purpose |
+|---|---|
+| GET `/runtimes` | installed builds + capabilities + pinning |
+| GET `/runtimes/releases[?backend=]` | official releases with scored asset matches |
+| POST `/runtimes/install` | `{tag, asset, backend}` — async, progress via events |
+| POST `/runtimes/import` | `{path}` custom llama-server |
+| POST `/runtimes/{id}/preferred`, `/health` | |
+| GET `/runtimes/{id}/capabilities` | parsed caps + raw help + version output |
+| DELETE `/runtimes/{id}` | refused while pinned by models |
+
+## Chat
+
+| Method & path | Purpose |
+|---|---|
+| GET/POST `/chat` | list / create conversations |
+| PATCH `/chat/{id}` | title, model_id, system, archived, params |
+| DELETE `/chat/{id}` | delete |
+| GET `/chat/{id}/messages` | full message tree (branches included) |
+| POST `/chat/{id}/generate` | `{parent_id?, content?, params?}` → streams `chat.token` events; empty content + parent_id = regenerate/branch |
+| POST `/chat/{id}/stop` | cancel generation |
+
+## Public server
+
+| Method & path | Purpose |
+|---|---|
+| GET/PUT `/server` | config (port, bind, allow_lan, cors, autostart) + running state |
+| POST `/server/start|stop|regenerate-key` | |
+| GET `/server/requests` | recent public requests |
+
+The public OpenAI-compatible server itself (separate port, separate key):
+`GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/completions`,
+`POST /v1/embeddings`, `POST /v1/responses` (subject to runtime support).

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go (backend tests, ${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+      - name: Format check
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - name: Vet
+        run: go vet ./...
+      - name: Unit + integration tests
+        run: go test ./...
+      - name: Backend self-test
+        shell: bash
+        run: |
+          go build -o /tmp/openinfer-core ./apps/core
+          /tmp/openinfer-core --selftest --token ci --data-dir /tmp/oi-ci | grep '"ready":true'
+
+  qt:
+    name: Qt desktop (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.*"
+          modules: "qtwebsockets"
+      - name: Build desktop
+        run: |
+          cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openinfer-studio-linux-dev
+          path: build/openinfer-studio
+
+  # Releases are produced only by an explicit tag-triggered workflow, never
+  # automatically from CI pushes.

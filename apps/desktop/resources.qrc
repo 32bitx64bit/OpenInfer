@@ -1,0 +1,27 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/Main.qml</file>
+        <file>qml/AppTheme.qml</file>
+        <file>qml/qmldir</file>
+        <file>qml/services/Api.qml</file>
+        <file>qml/services/Events.qml</file>
+        <file>qml/components/NavButton.qml</file>
+        <file>qml/components/Card.qml</file>
+        <file>qml/components/EmptyState.qml</file>
+        <file>qml/components/Tag.qml</file>
+        <file>qml/components/ConfirmDialog.qml</file>
+        <file>qml/components/FormField.qml</file>
+        <file>qml/components/StatusDot.qml</file>
+        <file>qml/dialogs/LoadConfigDialog.qml</file>
+        <file>qml/dialogs/FailureDialog.qml</file>
+        <file>qml/pages/ChatPage.qml</file>
+        <file>qml/pages/DiscoverPage.qml</file>
+        <file>qml/pages/LibraryPage.qml</file>
+        <file>qml/pages/DeveloperPage.qml</file>
+        <file>qml/pages/RuntimesPage.qml</file>
+        <file>qml/pages/DownloadsPage.qml</file>
+        <file>qml/pages/LogsPage.qml</file>
+        <file>qml/pages/InstanceDetailPage.qml</file>
+        <file>qml/pages/SettingsPage.qml</file>
+    </qresource>
+</RCC>
