@@ -20,6 +20,68 @@ import (
 
 var now = func() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
+// Filename quant / split patterns used when deriving a display alias.
+var (
+	aliasQuantRe = regexp.MustCompile(`(?i)[.\-_]((?:IQ[1-4]_[A-Z0-9]+|Q[1-8]_[A-Z0-9_]+(?:_[SMXL])?|F16|F32|BF16|TQ[12]_0|MXFP4|Q4_0))`)
+	aliasSplitRe = regexp.MustCompile(`(?i)-(\d{5})-of-(\d{5})$`)
+)
+
+// goodAlias reports whether a GGUF general.name (or existing DB alias) is
+// usable as a display name. Upstream converters sometimes leave stubs like
+// "Hf" in general.name.
+func goodAlias(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 {
+		return false
+	}
+	switch strings.ToLower(s) {
+	case "model", "gguf", "untitled", "unknown", "none":
+		return false
+	}
+	return true
+}
+
+// deriveAlias chooses a human-readable library alias. Prefer a solid
+// general.name; otherwise build one from the GGUF filename or the managed
+// Hugging Face repo folder (author--Repo-Name-GGUF/…).
+func deriveAlias(primaryPath, ggufName string) string {
+	if goodAlias(ggufName) {
+		return strings.TrimSpace(ggufName)
+	}
+	base := strings.TrimSuffix(filepath.Base(primaryPath), ".gguf")
+	base = aliasSplitRe.ReplaceAllString(base, "")
+	cleaned := aliasQuantRe.ReplaceAllString(base, "")
+	cleaned = regexp.MustCompile(`[-_.]{2,}`).ReplaceAllString(cleaned, "-")
+	cleaned = strings.Trim(cleaned, "._- ")
+	if goodAlias(cleaned) {
+		return cleaned
+	}
+	if goodAlias(base) {
+		return base
+	}
+	// Managed download layout: …/author--Repo-Name-GGUF/<group>/<file>.gguf
+	repoDir := filepath.Base(filepath.Dir(filepath.Dir(primaryPath)))
+	if _, name, ok := strings.Cut(repoDir, "--"); ok {
+		repoDir = name
+	}
+	repoDir = regexp.MustCompile(`(?i)-gguf$`).ReplaceAllString(repoDir, "")
+	repoDir = strings.ReplaceAll(repoDir, "-", " ")
+	repoDir = strings.Join(strings.Fields(repoDir), " ")
+	if goodAlias(repoDir) {
+		return repoDir
+	}
+	if cleaned != "" {
+		return cleaned
+	}
+	if base != "" {
+		return base
+	}
+	if strings.TrimSpace(ggufName) != "" {
+		return strings.TrimSpace(ggufName)
+	}
+	return filepath.Base(primaryPath)
+}
+
 // Model is the library view of one logical model (possibly split).
 type Model struct {
 	ID            string          `json:"id"`
@@ -158,7 +220,7 @@ func (l *Library) Scan() (int, error) {
 	}
 
 	count := 0
-	for stem, files := range groups {
+	for _, files := range groups {
 		sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 		primary := files[0].path
 		// Full validation: header metadata + tensor-table integrity. Files
@@ -216,10 +278,7 @@ func (l *Library) Scan() (int, error) {
 			"tensor_errors":    tensorIssues,
 		})
 		id := stableID(primary)
-		alias := md.Name
-		if alias == "" {
-			alias = filepath.Base(stem)
-		}
+		alias := deriveAlias(primary, md.Name)
 		_, err = l.db.Exec(`INSERT INTO models
 			(id,alias,primary_path,projector_path,size_bytes,quantization,architecture,parameters,
 			 context_length,metadata_json,created_at,updated_at)
@@ -229,7 +288,13 @@ func (l *Library) Scan() (int, error) {
 			 size_bytes=excluded.size_bytes, quantization=excluded.quantization,
 			 architecture=excluded.architecture, parameters=excluded.parameters,
 			 context_length=excluded.context_length, metadata_json=excluded.metadata_json,
-			 updated_at=excluded.updated_at`,
+			 updated_at=excluded.updated_at,
+			 alias=CASE
+			   WHEN length(trim(models.alias)) < 4
+			     OR lower(trim(models.alias)) IN ('model','gguf','untitled','unknown','none')
+			   THEN excluded.alias
+			   ELSE models.alias
+			 END`,
 			id, alias, primary, proj, total, md.Quantization, md.Architecture,
 			int64(md.Parameters), int(md.ContextLength), string(metaJSON), now(), now())
 		if err != nil {

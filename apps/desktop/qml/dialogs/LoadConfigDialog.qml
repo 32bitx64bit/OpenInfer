@@ -55,12 +55,19 @@ Dialog {
     function openFor(m) {
         model = m
         modelId = m.id
-        settings["alias"] = m.alias || ""
-        if (!settings["context_length"] || settings["context_length"] <= 0)
-            settings["context_length"] = 4096
-        // Multimodal chat templates (vision/audio) usually need Jinja.
-        settings["jinja"] = root.isMultimodal(m)
-        settings["no_mmproj_offload"] = false
+        // Reassign the whole settings object so QML bindings refresh. Mutating
+        // keys in place does not notify TextFields still bound to the previous model.
+        var next = {
+            "context_length": 4096, "gpu_offload": "all", "gpu_layers": 0,
+            "threads": 0, "flash_attention": "auto", "parallel": 0,
+            "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
+            "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
+            "rope_scaling": "", "alias": m.alias || "", "raw_args": "",
+            "jinja": root.isMultimodal(m), "no_mmproj_offload": false,
+            "save_on_success": true
+        }
+        settings = next
+        if (aliasField) aliasField.text = next.alias
         selectedRuntime = m.pinned_runtime || ""
         loadError = ""
         preview = null
@@ -70,6 +77,8 @@ Dialog {
         })
         api.get("/api/v1/models/" + m.id + "/presets", function(st, data) {
             if (st !== 200) return
+            // Ignore stale responses if the user opened another model.
+            if (root.modelId !== m.id) return
             root.presets = (data && data.presets) || []
             // Prefill from last-known-good, else the default preset.
             var applied = false
@@ -88,6 +97,12 @@ Dialog {
             // Presets may omit jinja; keep multimodal default if still unset.
             if (root.settings.jinja === undefined || root.settings.jinja === null) {
                 root.setSetting("jinja", root.isMultimodal(m))
+            }
+            // Presets must not leave a stale alias from another model; always
+            // prefer this model's library alias when the field is empty.
+            if (!root.settings.alias) {
+                root.setSetting("alias", m.alias || "")
+                if (aliasField) aliasField.text = m.alias || ""
             }
         })
         open()
@@ -120,9 +135,13 @@ Dialog {
 
     function applyPreset(p) {
         try {
-            var s = JSON.parse(JSON.stringify(p.settings))
-            for (var k in s) root.settings[k] = s[k]
-            settingsChanged()
+            var incoming = JSON.parse(JSON.stringify(p.settings))
+            var s = Object.assign({}, root.settings)
+            for (var k in incoming) s[k] = incoming[k]
+            // Keep the library alias unless the preset explicitly set one.
+            if (!s.alias && root.model) s.alias = root.model.alias || ""
+            root.settings = s
+            if (aliasField) aliasField.text = s.alias || ""
             scheduleRefresh()
         } catch (e) {}
     }
@@ -496,8 +515,12 @@ Dialog {
                         Layout.fillWidth: true
                         label: "Model alias"; argName: "--alias"
                         hint: "Name exposed through the API."
-                        TextField { width: 320; text: root.settings.alias
-                            onEditingFinished: root.setSetting("alias", text) }
+                        TextField {
+                            id: aliasField
+                            width: 320
+                            text: root.settings.alias
+                            onEditingFinished: root.setSetting("alias", text)
+                        }
                     }
                 }
 
