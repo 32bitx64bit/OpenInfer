@@ -647,17 +647,24 @@ Item {
                 }
             }
 
-            // Input
+            // Composer — auto-grows with wrapped text, then scrolls internally.
             Rectangle {
+                id: composerBar
                 Layout.fillWidth: true
-                height: inputCol.implicitHeight + 16
+                Layout.preferredHeight: composerCol.implicitHeight + 20
+                Layout.minimumHeight: 72
                 color: AppTheme.bgAlt
                 border.color: AppTheme.border
+
                 ColumnLayout {
-                    id: inputCol
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 6
+                    id: composerCol
+                    // Size from content upward — do not anchors.fill, or the
+                    // bar's preferredHeight and this column fight each other.
+                    width: parent.width - 20
+                    x: 10
+                    y: 10
+                    spacing: 8
+
                     RowLayout {
                         visible: page.pendingAudioPath !== ""
                         Layout.fillWidth: true
@@ -674,19 +681,13 @@ Item {
                             onClicked: { page.pendingAudioPath = ""; page.pendingAudioName = "" }
                         }
                     }
-                    Label {
-                        visible: page.experimentalAudio && page.currentConv && !page.modelSupportsAudio()
-                        Layout.fillWidth: true
-                        text: "Audio attach is available when the chat model is tagged has_audio (rescan library after enabling experimental audio)."
-                        color: AppTheme.textFaint
-                        font.pixelSize: AppTheme.fontSmall
-                        wrapMode: Text.WordWrap
-                    }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
+
                         Button {
                             visible: page.canAttachAudio()
+                            Layout.alignment: Qt.AlignBottom
                             text: "Audio"
                             enabled: page.currentConv !== null && !page.generating
                             ToolTip.visible: audioTip.hovered
@@ -694,32 +695,82 @@ Item {
                             HoverHandler { id: audioTip }
                             onClicked: audioDialog.open()
                         }
-                        ScrollView {
+
+                        // TextArea is not scrollable alone — attach it to a
+                        // Flickable that grows with content up to max height.
+                        Flickable {
+                            id: inputFlick
                             Layout.fillWidth: true
-                            // Grow with the wrapped text up to ~6 lines, then scroll.
-                            Layout.preferredHeight: Math.min(140, Math.max(44, input.contentHeight + 24))
+                            Layout.alignment: Qt.AlignBottom
+                            Layout.preferredHeight: {
+                                var minH = 44
+                                var maxH = 220
+                                var h = contentHeight
+                                if (h < minH) h = minH
+                                if (h > maxH) h = maxH
+                                return h
+                            }
+                            Layout.maximumHeight: 220
+                            contentWidth: width
+                            contentHeight: Math.max(input.implicitHeight, 44)
                             clip: true
-                            TextArea {
+                            boundsBehavior: Flickable.StopAtBounds
+                            flickableDirection: Flickable.VerticalFlick
+                            interactive: contentHeight > height + 1
+
+                            TextArea.flickable: TextArea {
                                 id: input
-                                placeholderText: page.currentConv ? "Message (Enter to send, Shift+Enter for newline)" : "Create a chat first"
                                 enabled: page.currentConv !== null
                                 wrapMode: TextArea.Wrap
+                                selectByMouse: true
+                                persistentSelection: true
+                                placeholderText: page.currentConv
+                                    ? "Message (Enter to send, Shift+Enter for newline)"
+                                    : "Create a chat first"
+                                background: Rectangle {
+                                    radius: AppTheme.radiusSmall
+                                    color: AppTheme.surface
+                                    border.width: 1
+                                    border.color: input.activeFocus ? AppTheme.accent : AppTheme.border
+                                }
                                 Keys.onReturnPressed: function(e) {
-                                    if (e.modifiers & Qt.ShiftModifier) { e.accepted = false; return }
+                                    if (e.modifiers & Qt.ShiftModifier) {
+                                        e.accepted = false
+                                        return
+                                    }
                                     e.accepted = true
                                     page.send()
                                 }
+                                // Keep caret visible while typing past the fold.
+                                onCursorRectangleChanged: {
+                                    if (!inputFlick.interactive) return
+                                    var y = cursorRectangle.y
+                                    var bottom = y + cursorRectangle.height
+                                    if (y < inputFlick.contentY)
+                                        inputFlick.contentY = Math.max(0, y)
+                                    else if (bottom > inputFlick.contentY + inputFlick.height)
+                                        inputFlick.contentY = bottom - inputFlick.height
+                                }
+                            }
+
+                            ScrollBar.vertical: ScrollBar {
+                                policy: inputFlick.contentHeight > inputFlick.height
+                                        ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
                             }
                         }
+
                         Button {
                             visible: !page.generating
+                            Layout.alignment: Qt.AlignBottom
                             text: "Send"
                             highlighted: true
-                            enabled: page.currentConv !== null && (input.text.trim() !== "" || page.pendingAudioPath !== "")
+                            enabled: page.currentConv !== null
+                                     && (input.text.trim() !== "" || page.pendingAudioPath !== "")
                             onClicked: page.send()
                         }
                         Button {
                             visible: page.generating
+                            Layout.alignment: Qt.AlignBottom
                             text: "Stop"
                             onClicked: {
                                 if (page.currentConv)
