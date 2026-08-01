@@ -4,7 +4,7 @@
 ; paths against this .iss file's directory, not the caller's cwd).
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.1.0"
 #endif
 #ifndef MyAppDir
   #error MyAppDir must be set to an absolute payload path via /DMyAppDir=...
