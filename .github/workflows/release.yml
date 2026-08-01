@@ -39,18 +39,38 @@ jobs:
           echo "Releasing version=$VERSION tag=$TAG"
 
   linux:
-    name: Linux AppImage
+    name: Linux AppImage (${{ matrix.arch }})
     needs: version
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           check-latest: true
-      - uses: jurplel/install-qt-action@v4
+      - name: Install Qt (x86_64)
+        if: matrix.arch == 'x86_64'
+        uses: jurplel/install-qt-action@v4
         with:
           version: "6.9.*"
+          modules: "qtwebsockets"
+          cache: true
+      - name: Install Qt (aarch64)
+        if: matrix.arch == 'aarch64'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.9.*"
+          host: linux_arm64
+          target: desktop
+          arch: linux_gcc_arm64
           modules: "qtwebsockets"
           cache: true
       - name: Install AppImage helpers
@@ -61,15 +81,15 @@ jobs:
             librsvg2-bin libgl-dev libxkbcommon-dev libxcb-cursor0 \
             || sudo apt-get install -y libfuse2 desktop-file-utils \
             librsvg2-bin libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
-      - name: Build AppImage
+      - name: Build AppImage (${{ matrix.arch }})
         shell: bash
         run: |
           chmod +x packaging/linux/build-appimage.sh
-          ./packaging/linux/build-appimage.sh
+          ./packaging/linux/build-appimage.sh "${{ matrix.arch }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: release-linux
-          path: dist/linux/*.AppImage
+          name: release-linux-${{ matrix.arch }}
+          path: dist/linux-${{ matrix.arch }}/*.AppImage
 
   windows:
     name: Windows installer

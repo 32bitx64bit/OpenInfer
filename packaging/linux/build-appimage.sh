@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Build a Linux x86_64 AppImage for OpenInfer Studio.
+# Build a Linux AppImage for OpenInfer Studio (native arch only).
+# Usage: ./packaging/linux/build-appimage.sh [x86_64|aarch64|arm64]
+# Default: host arch (uname -m). Cross-builds are not supported — use a
+# matching runner (e.g. ubuntu-24.04-arm for aarch64).
 # Downloads linuxdeploy + plugins into packaging/linux/.cache when missing.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -7,8 +10,31 @@ cd "$(dirname "$0")/../.."
 VERSION="$(tr -d '[:space:]' < internal/version/VERSION)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 DATE="$(date -u +%Y-%m-%dT%H:%MZ)"
-ARCH="$(uname -m)"
-OUT_DIR="dist/linux"
+HOST_ARCH="$(uname -m)"
+
+case "${1:-}" in
+  "")
+    ARCH="$HOST_ARCH"
+    ;;
+  x86_64|amd64)
+    ARCH=x86_64
+    ;;
+  aarch64|arm64)
+    ARCH=aarch64
+    ;;
+  *)
+    echo "usage: $0 [x86_64|aarch64]" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$ARCH" != "$HOST_ARCH" ]; then
+  echo "error: cannot cross-build AppImage for $ARCH on host $HOST_ARCH" >&2
+  echo "hint: run on a native $ARCH machine (CI: ubuntu-24.04-arm for aarch64)" >&2
+  exit 1
+fi
+
+OUT_DIR="dist/linux-${ARCH}"
 APPDIR="$OUT_DIR/OpenInferStudio.AppDir"
 CACHE="packaging/linux/.cache"
 APPIMAGE="$OUT_DIR/OpenInferStudio-${VERSION}-linux-${ARCH}.AppImage"
@@ -19,7 +45,7 @@ mkdir -p "$APPDIR/usr/bin" \
          "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
          "$CACHE"
 
-echo "==> building backend + desktop ($VERSION)"
+echo "==> building backend + desktop ($VERSION, $ARCH)"
 ./scripts/build.sh release
 
 BIN=build/openinfer-studio
@@ -74,19 +100,20 @@ fetch() {
 }
 
 # Continuous linuxdeploy builds; pin via URL path that CI also uses.
+# Tool binaries are cached per arch so x86_64 and aarch64 don't collide.
 fetch "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${ARCH}.AppImage" \
-  "$CACHE/linuxdeploy"
+  "$CACHE/linuxdeploy-${ARCH}"
 fetch "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${ARCH}.AppImage" \
-  "$CACHE/linuxdeploy-plugin-qt"
+  "$CACHE/linuxdeploy-plugin-qt-${ARCH}"
 fetch "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage" \
-  "$CACHE/appimagetool"
+  "$CACHE/appimagetool-${ARCH}"
 
 export APPIMAGE_EXTRACT_AND_RUN=1
 export QML_SOURCES_PATHS="$PWD/apps/desktop/qml"
 export EXTRA_QT_PLUGINS="wayland;iconengines;imageformats;platforms;platformthemes;styles;tls;networkinformation"
 
 echo "==> linuxdeploy (bundle Qt)"
-"$CACHE/linuxdeploy" --appdir "$APPDIR" \
+"$CACHE/linuxdeploy-${ARCH}" --appdir "$APPDIR" \
   --executable "$APPDIR/usr/bin/openinfer-studio" \
   --desktop-file "$APPDIR/usr/share/applications/openinfer-studio.desktop" \
   --icon-file "$ICON_DST" \
@@ -97,6 +124,6 @@ cp -f build/openinfer-core "$APPDIR/usr/bin/openinfer-core"
 chmod +x "$APPDIR/usr/bin/openinfer-core"
 
 echo "==> appimagetool"
-ARCH="$ARCH" "$CACHE/appimagetool" "$APPDIR" "$APPIMAGE"
+ARCH="$ARCH" "$CACHE/appimagetool-${ARCH}" "$APPDIR" "$APPIMAGE"
 chmod +x "$APPIMAGE"
 echo "AppImage ready: $APPIMAGE (commit=$COMMIT date=$DATE)"

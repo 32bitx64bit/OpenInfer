@@ -12,7 +12,8 @@ See *Known limitations* below.
 
 | Platform | Status | Notes |
 |---|---|---|
-| Linux x86_64 | primary | AppImage via `packaging/linux/build-appimage.sh` |
+| Linux x86_64 | primary | AppImage via `packaging/linux/build-appimage.sh x86_64` |
+| Linux aarch64 | supported | AppImage via `packaging/linux/build-appimage.sh aarch64` (native arm64 host) |
 | Windows x86_64 | supported | `.exe` installer + portable zip |
 | macOS arm64 | supported | `.dmg` via `packaging/macos/build-bundle.sh arm64` |
 | macOS x86_64 | supported | `.dmg` via `packaging/macos/build-bundle.sh x86_64` |
@@ -104,19 +105,19 @@ opt-in. Inference processes bind loopback with per-process keys.
 Version lives in `internal/version/VERSION`. Tag `vX.Y.Z` (matching that file)
 to trigger `.github/workflows/release.yml`, which publishes:
 
-- Linux: `OpenInferStudio-*-linux-x86_64.AppImage`
+- Linux: `OpenInferStudio-*-linux-x86_64.AppImage` and `OpenInferStudio-*-linux-aarch64.AppImage`
 - Windows: `OpenInferStudio-*-windows-x86_64-setup.exe` (+ portable `.zip`)
 - macOS: `OpenInferStudio-*-macos-arm64.dmg` and `OpenInferStudio-*-macos-x86_64.dmg`
 
 Local packaging (on each OS):
 
 ```bash
-./packaging/linux/build-appimage.sh
+./packaging/linux/build-appimage.sh x86_64
+./packaging/linux/build-appimage.sh aarch64   # on an arm64 Linux host
 ./packaging/macos/build-bundle.sh arm64
 ./packaging/macos/build-bundle.sh x86_64
 pwsh ./packaging/windows/build-installer.ps1
 ```
-
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
