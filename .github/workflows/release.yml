@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release as (e.g. v1.0.0). Leave empty to use VERSION file only."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          VERSION="$(tr -d '[:space:]' < internal/version/VERSION)"
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+              TAG="$GITHUB_REF_NAME"
+            else
+              TAG="v${VERSION}"
+            fi
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing version=$VERSION tag=$TAG"
+
+  linux:
+    name: Linux AppImage
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.9.*"
+          modules: "qtwebsockets"
+          cache: true
+      - name: Install AppImage helpers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 desktop-file-utils \
+            librsvg2-bin libgl1-mesa-dev libxkbcommon-dev libxcb-cursor0
+      - name: Build AppImage
+        shell: bash
+        run: |
+          chmod +x packaging/linux/build-appimage.sh
+          ./packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist/linux/*.AppImage
+
+  windows:
+    name: Windows installer
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.9.*"
+          modules: "qtwebsockets"
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install Ninja + Inno Setup
+        shell: bash
+        run: |
+          choco install ninja innosetup -y
+      - name: Build installer
+        shell: pwsh
+        run: ./packaging/windows/build-installer.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/windows/*.exe
+            dist/windows/*.zip
+
+  macos:
+    name: macOS DMG
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.9.*"
+          modules: "qtwebsockets"
+          cache: true
+      - name: Patch Qt AGL link
+        shell: bash
+        run: |
+          if [ -z "${QT_ROOT_DIR:-}" ]; then exit 0; fi
+          while IFS= read -r -d '' f; do
+            if grep -q -- '-framework AGL' "$f" 2>/dev/null; then
+              sed -i '' 's/-framework AGL//g' "$f"
+            fi
+          done < <(find "$QT_ROOT_DIR" -type f -name '*.cmake' -print0 2>/dev/null || true)
+      - name: Build DMG
+        shell: bash
+        run: |
+          chmod +x packaging/macos/build-bundle.sh
+          ./packaging/macos/build-bundle.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist/macos/*.dmg
+
+  publish:
+    name: GitHub Release
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.exe' -o -name '*.zip' -o -name '*.dmg' \) \
+            -exec cp -v {} release-assets/ \;
+          ls -lah release-assets
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: OpenInfer Studio ${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

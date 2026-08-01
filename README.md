@@ -5,16 +5,16 @@ locally with llama.cpp. Search Hugging Face, manage llama.cpp builds, load
 models with explicit engine settings, chat with streaming, and serve loaded
 models through a local OpenAI-compatible API.
 
-**Status:** early development. Discover → download → load → chat → serve works
-end to end. See *Known limitations* below.
+**Status:** 1.0.0. Discover → download → load → chat → serve works end to end.
+See *Known limitations* below.
 
 ## Platforms
 
 | Platform | Status | Notes |
 |---|---|---|
-| Linux x86_64 / arm64 | primary | AppImage / portable packaging |
-| Windows x86_64 | supported | portable zip via windeployqt |
-| macOS arm64 | supported | .app via macdeployqt; Metal preferred |
+| Linux x86_64 | primary | AppImage via `packaging/linux/build-appimage.sh` |
+| Windows x86_64 | supported | `.exe` installer + portable zip |
+| macOS arm64 | supported | `.dmg` via `packaging/macos/build-bundle.sh` |
 | macOS x86_64 | supported | CPU builds |
 
 ## Architecture
@@ -96,6 +96,23 @@ opt-in. Inference processes bind loopback with per-process keys.
 - Windows hardware detection is thinner than Linux.
 - No dedicated first-run onboarding wizard yet.
 - No software license selected yet.
+
+## Releases
+
+Version lives in `internal/version/VERSION`. Tag `vX.Y.Z` (matching that file)
+to trigger `.github/workflows/release.yml`, which publishes:
+
+- Linux: `OpenInferStudio-*-linux-x86_64.AppImage`
+- Windows: `OpenInferStudio-*-windows-x86_64-setup.exe` (+ portable `.zip`)
+- macOS: `OpenInferStudio-*-macos-arm64.dmg`
+
+Local packaging (on each OS):
+
+```bash
+./packaging/linux/build-appimage.sh
+./packaging/macos/build-bundle.sh
+pwsh ./packaging/windows/build-installer.ps1
+```
 
 ## Contributing
 
