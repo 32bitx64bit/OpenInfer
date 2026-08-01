@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.8.*"
+          version: "6.9.*"
           modules: "qtwebsockets"
           arch: win64_msvc2022_64
           cache: true
@@ -67,9 +67,27 @@ jobs:
         if: runner.os != 'Windows'
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.8.*"
+          version: "6.9.*"
           modules: "qtwebsockets"
           cache: true
+
+      - name: Patch Qt AGL link (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # macOS 15+/Tahoe SDKs removed AGL; Qt < 6.8.4 / < 6.9.2 still
+          # injects -framework AGL via FindWrapOpenGL.cmake.
+          if [ -z "${QT_ROOT_DIR:-}" ]; then
+            echo "QT_ROOT_DIR not set; skipping AGL patch"
+            exit 0
+          fi
+          find "$QT_ROOT_DIR" \( -name 'FindWrapOpenGL.cmake' -o -name '*.cmake' \) \
+            -print0 2>/dev/null \
+            | xargs -0 grep -l -- '-framework AGL' 2>/dev/null \
+            | while read -r f; do
+                echo "patching $f"
+                sed -i '' 's/-framework AGL//g' "$f"
+              done
 
       - name: MSVC developer command prompt
         if: runner.os == 'Windows'
@@ -101,6 +119,16 @@ jobs:
             EXTRA+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
           fi
           cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release "${EXTRA[@]}"
+          # Belt-and-suspenders: strip any residual AGL flags from the
+          # generated build files (Qt may re-inject them at configure time).
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            find build -type f \( -name 'link.txt' -o -name 'build.ninja' -o -name 'flags.make' \) \
+              -exec grep -l -- '-framework AGL' {} \; 2>/dev/null \
+              | while read -r f; do
+                  echo "stripping AGL from $f"
+                  sed -i '' 's/-framework AGL//g' "$f"
+                done
+          fi
 
       - name: Build desktop
         shell: bash
