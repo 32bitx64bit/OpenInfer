@@ -29,6 +29,7 @@ import (
 	"github.com/openinfer/openinfer-studio/internal/models"
 	"github.com/openinfer/openinfer-studio/internal/proxy"
 	"github.com/openinfer/openinfer-studio/internal/runtimes"
+	"github.com/openinfer/openinfer-studio/internal/version"
 	"github.com/openinfer/openinfer-studio/migrations"
 )
 
@@ -39,8 +40,14 @@ func main() {
 		ppidFlag  = flag.Int("ppid", 0, "parent desktop PID; backend exits when it disappears")
 		dataDir   = flag.String("data-dir", "", "override application data directory (tests/portable mode)")
 		selfTest  = flag.Bool("selftest", false, "start, print readiness, and exit (CI smoke test)")
+		showVer   = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println(version.Summary())
+		return
+	}
 
 	if *tokenFlag == "" {
 		fmt.Fprintln(os.Stderr, `{"ready":false,"error":"missing --token"}`)
@@ -56,7 +63,9 @@ func main() {
 	logs := diagnostics.NewManager(layout.AppLogs)
 	defer logs.Close()
 	log := logs.Logger("core", slog.LevelInfo)
-	log.Info("openinfer-core starting", "goos", runtime.GOOS, "goarch", runtime.GOARCH, "data", layout.DataDir)
+	log.Info("openinfer-core starting",
+		"version", version.Version(), "commit", version.Commit,
+		"goos", runtime.GOOS, "goarch", runtime.GOARCH, "data", layout.DataDir)
 
 	db, err := database.Open(layout.Database, migrations.FS)
 	if err != nil {
@@ -157,7 +166,8 @@ func main() {
 
 	// Structured readiness message consumed by the desktop launcher.
 	ready, _ := json.Marshal(map[string]any{
-		"ready": true, "port": srv.BoundPort(), "pid": os.Getpid(), "version": "0.1.0",
+		"ready": true, "port": srv.BoundPort(), "pid": os.Getpid(),
+		"version": version.Version(), "commit": version.Commit,
 	})
 	fmt.Println(string(ready))
 

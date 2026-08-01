@@ -14,6 +14,7 @@ import (
 	"github.com/openinfer/openinfer-studio/internal/hardware"
 	"github.com/openinfer/openinfer-studio/internal/huggingface"
 	"github.com/openinfer/openinfer-studio/internal/runtimes"
+	"github.com/openinfer/openinfer-studio/internal/version"
 )
 
 type handlers struct {
@@ -25,8 +26,11 @@ type handlers struct {
 }
 
 func (h *handlers) status(w http.ResponseWriter, r *http.Request) {
+	info := version.Info()
 	writeJSON(w, 200, map[string]any{
-		"app": "OpenInfer Studio", "version": "0.1.0", "api": 1,
+		"app": "OpenInfer Studio", "api": 1,
+		"version": info["version"], "commit": info["commit"], "date": info["date"],
+		"goos": info["goos"], "goarch": info["goarch"],
 		"data_dir": h.d.Layout.DataDir,
 	})
 }

@@ -3,12 +3,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="0.1.0"
+VERSION="$(tr -d '[:space:]' < internal/version/VERSION)"
 APP="dist/OpenInfer Studio.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" \
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
+DATE="$(date -u +%Y-%m-%dT%H:%MZ)"
+LDFLAGS="-s -w -X github.com/openinfer/openinfer-studio/internal/version.Commit=${COMMIT} -X github.com/openinfer/openinfer-studio/internal/version.Date=${DATE}"
+
+GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" \
     -o "$APP/Contents/MacOS/openinfer-core" ./apps/core
 
 cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release

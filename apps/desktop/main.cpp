@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonDocument>
@@ -16,6 +17,10 @@
 #include <QRandomGenerator>
 #include <QTcpServer>
 #include <QTimer>
+
+#ifndef OPENINFER_VERSION
+#define OPENINFER_VERSION "0.0.0-dev"
+#endif
 
 namespace {
 
@@ -72,7 +77,7 @@ int main(int argc, char *argv[])
     QGuiApplication::setApplicationName(QStringLiteral("openinfer-studio"));
     QGuiApplication::setApplicationDisplayName(QStringLiteral("OpenInfer Studio"));
     QGuiApplication::setOrganizationName(QStringLiteral("OpenInfer"));
-    QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QGuiApplication::setApplicationVersion(QStringLiteral(OPENINFER_VERSION));
 
     // Native styles (macOS/Windows) reject control customization used throughout
     // the QML UI; Fusion is consistent and safe under offscreen CI too.
@@ -157,6 +162,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("wsBase"),
                                              QStringLiteral("ws://127.0.0.1:%1").arg(port));
     engine.rootContext()->setContextProperty(QStringLiteral("apiToken"), token);
+    engine.rootContext()->setContextProperty(QStringLiteral("appVersion"),
+                                             QStringLiteral(OPENINFER_VERSION));
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(2); }, Qt::QueuedConnection);

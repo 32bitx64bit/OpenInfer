@@ -28,6 +28,8 @@ llama.cpp. Qt 6/QML frontend, Go backend, SQLite state, one managed
 - SQLite schema changes = new file in `migrations/NNNN_name.sql`; never edit
   applied migrations.
 - Event envelopes: `{version:1, event, timestamp, payload}`.
+- App release version lives in `internal/version/VERSION` (embedded by Go,
+  read by CMake/packaging). Bump that file to cut a release.
 
 ## Layout
 

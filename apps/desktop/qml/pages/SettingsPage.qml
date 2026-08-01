@@ -15,8 +15,12 @@ Item {
     property var directories: []
     property bool hfConfigured: false
     property string statusText: ""
+    property var appStatus: null
 
     function reload() {
+        api.get("/api/v1/status", function(st, data) {
+            if (st === 200) page.appStatus = data
+        })
         api.get("/api/v1/settings", function(st, data) {
             if (st === 200) {
                 page.settings = data || {}
@@ -266,6 +270,66 @@ Item {
                                 page.reload()
                             })
                         }
+                    }
+                }
+            }
+
+            // About / version (single source: internal/version/VERSION via API)
+            GroupBox {
+                Layout.fillWidth: true
+                title: "About"
+                ColumnLayout {
+                    width: parent.width
+                    spacing: 6
+                    Label {
+                        text: "OpenInfer Studio"
+                        color: AppTheme.text
+                        font.weight: Font.DemiBold
+                    }
+                    GridLayout {
+                        columns: 2
+                        columnSpacing: 20
+                        rowSpacing: 4
+                        width: parent.width
+                        Repeater {
+                            model: {
+                                var uiVer = (typeof appVersion !== "undefined" && appVersion) ? appVersion : ""
+                                var coreVer = page.appStatus ? (page.appStatus.version || "") : ""
+                                var commit = page.appStatus ? (page.appStatus.commit || "") : ""
+                                var built = page.appStatus ? (page.appStatus.date || "") : ""
+                                var plat = page.appStatus
+                                    ? ((page.appStatus.goos || "") + "/" + (page.appStatus.goarch || ""))
+                                    : ""
+                                return [
+                                    ["App version", uiVer || coreVer || "—"],
+                                    ["Backend version", coreVer || "—"],
+                                    ["Commit", commit && commit !== "dev" ? commit : (commit || "—")],
+                                    ["Built", built && built !== "unknown" ? built : "—"],
+                                    ["Platform", plat || "—"],
+                                    ["Data directory", page.appStatus ? (page.appStatus.data_dir || "—") : "—"]
+                                ]
+                            }
+                            delegate: Row {
+                                spacing: 8
+                                Label { text: modelData[0]; color: AppTheme.textFaint; font.pixelSize: AppTheme.fontSmall; width: 140 }
+                                Label {
+                                    text: String(modelData[1])
+                                    color: AppTheme.textDim
+                                    font.pixelSize: AppTheme.fontSmall
+                                    font.family: (modelData[0] === "Data directory" || modelData[0] === "Commit")
+                                        ? "monospace" : Qt.application.font.family
+                                    elide: Text.ElideMiddle
+                                    width: Math.min(420, page.width - AppTheme.pad * 4 - 160)
+                                }
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Version information is used for diagnostics and future update checks."
+                        color: AppTheme.textFaint
+                        font.pixelSize: AppTheme.fontSmall
+                        wrapMode: Text.WordWrap
                     }
                 }
             }

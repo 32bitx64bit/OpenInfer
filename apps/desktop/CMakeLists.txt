@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
-project(openinfer-studio VERSION 0.1.0 LANGUAGES CXX)
+
+# Single source of truth: internal/version/VERSION (shared with the Go backend).
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../../internal/version/VERSION" OPENINFER_VERSION_RAW)
+string(STRIP "${OPENINFER_VERSION_RAW}" OPENINFER_VERSION)
+if(NOT OPENINFER_VERSION MATCHES "^[0-9]+\\.[0-9]+")
+    message(FATAL_ERROR "invalid OPENINFER_VERSION from internal/version/VERSION: '${OPENINFER_VERSION}'")
+endif()
+
+project(openinfer-studio VERSION ${OPENINFER_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,6 +23,10 @@ qt_add_executable(openinfer-studio
     resources.qrc
 )
 
+target_compile_definitions(openinfer-studio PRIVATE
+    OPENINFER_VERSION="${OPENINFER_VERSION}"
+)
+
 target_link_libraries(openinfer-studio PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
@@ -27,6 +39,8 @@ set_target_properties(openinfer-studio PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "OpenInfer Studio"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.openinfer.studio"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${OPENINFER_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${OPENINFER_VERSION}"
 )
 
 install(TARGETS openinfer-studio

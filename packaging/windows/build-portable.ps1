@@ -1,13 +1,16 @@
-# Package OpenInfer Studio as a portable Windows zip.
-# Run on Windows with Qt 6 + MSVC and windeployqt available.
 $ErrorActionPreference = "Stop"
-$Version = "0.1.0"
+$Version = (Get-Content -Raw internal/version/VERSION).Trim()
 $Dist = "dist/OpenInferStudio-$Version-windows-x86_64"
 
 Remove-Item -Recurse -Force $Dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Dist | Out-Null
 
-go build -trimpath -ldflags "-s -w" -o "$Dist/openinfer-core.exe" ./apps/core
+$Commit = "dev"
+try { $Commit = (git rev-parse --short HEAD) } catch {}
+$Date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mmZ")
+$LdFlags = "-s -w -X github.com/openinfer/openinfer-studio/internal/version.Commit=$Commit -X github.com/openinfer/openinfer-studio/internal/version.Date=$Date"
+
+go build -trimpath -ldflags $LdFlags -o "$Dist/openinfer-core.exe" ./apps/core
 
 cmake -B build -S apps/desktop -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release

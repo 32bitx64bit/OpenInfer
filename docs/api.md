@@ -10,7 +10,7 @@ Errors: `{"error": "message", "detail": "debug detail"}`.
 
 | Method & path | Purpose |
 |---|---|
-| GET `/status` | app version, data dir |
+| GET `/status` | app identity: `version`, `commit`, `date`, `goos`/`goarch`, `api`, `data_dir` |
 | GET `/hardware[?refresh=1]` | detected hardware + backend recommendation |
 | GET `/settings` / PUT `/settings/{key}` | key-value settings (`{"value":"…"}`) |
 | GET `/logs/files`, GET `/logs/tail?name=` | log files, redacted tails |
