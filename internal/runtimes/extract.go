@@ -7,20 +7,46 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
 
+// archivePathUnsafe reports whether an archive entry name must be rejected
+// before joining. Zip/tar attackers use both / and \; on Windows,
+// filepath.IsAbs("/etc/passwd") is false and Join would place it under dest.
+func archivePathUnsafe(name string) bool {
+	if name == "" {
+		return true
+	}
+	n := strings.ReplaceAll(name, `\`, "/")
+	if n[0] == '/' {
+		return true
+	}
+	// Drive / UNC / volume forms (C:/..., //host/share).
+	if len(n) >= 2 && n[1] == ':' {
+		return true
+	}
+	if strings.HasPrefix(n, "//") {
+		return true
+	}
+	if filepath.IsAbs(name) || filepath.VolumeName(name) != "" || filepath.VolumeName(n) != "" {
+		return true
+	}
+	clean := path.Clean(n)
+	return clean == ".." || strings.HasPrefix(clean, "../")
+}
+
 // safeJoin prevents zip-slip / tar path traversal: the joined path must stay
 // inside dest after cleaning.
 func safeJoin(dest, name string) (string, error) {
-	clean := filepath.Clean(name)
-	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+	if archivePathUnsafe(name) {
 		return "", fmt.Errorf("unsafe archive path %q", name)
 	}
+	clean := filepath.FromSlash(path.Clean(strings.ReplaceAll(name, `\`, "/")))
 	full := filepath.Join(dest, clean)
 	rel, err := filepath.Rel(dest, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if err != nil || archivePathUnsafe(filepath.ToSlash(rel)) {
 		return "", fmt.Errorf("archive entry %q escapes destination", name)
 	}
 	return full, nil
@@ -179,16 +205,16 @@ func extractTarGz(path, dest string) ([]string, error) {
 }
 
 // safeSymlink creates a symlink at linkPath (inside dest) pointing to target,
-// rejecting absolute targets and any target that resolves outside dest.
+// rejecting absolute/rooted targets and any target that resolves outside dest.
 func safeSymlink(dest, linkPath, target string) error {
-	if target == "" || filepath.IsAbs(target) {
+	if archivePathUnsafe(target) {
 		return fmt.Errorf("unsafe symlink target %q", target)
 	}
 	// Resolve the target relative to the link's directory and require it to
 	// stay inside dest after cleaning.
 	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), target))
 	rel, err := filepath.Rel(dest, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	if err != nil || archivePathUnsafe(filepath.ToSlash(rel)) {
 		return fmt.Errorf("symlink %q → %q escapes destination", linkPath, target)
 	}
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {

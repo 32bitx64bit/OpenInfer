@@ -62,10 +62,15 @@ func TestExtractZipSlipRejected(t *testing.T) {
 func TestSafeJoin(t *testing.T) {
 	dest := t.TempDir()
 	ok, err := safeJoin(dest, "a/b/c.txt")
-	if err != nil || !filepath.HasPrefix(ok, dest) {
+	if err != nil {
 		t.Errorf("safe path rejected: %v", err)
+	} else {
+		rel, rerr := filepath.Rel(dest, ok)
+		if rerr != nil || archivePathUnsafe(filepath.ToSlash(rel)) {
+			t.Errorf("safe path escaped dest: ok=%q dest=%q", ok, dest)
+		}
 	}
-	for _, bad := range []string{"../x", "a/../../x", "/etc/passwd", ".."} {
+	for _, bad := range []string{"../x", "a/../../x", "/etc/passwd", "..", `C:\Windows\evil`, `\rooted\evil`} {
 		if _, err := safeJoin(dest, bad); err == nil {
 			t.Errorf("unsafe path %q accepted", bad)
 		}

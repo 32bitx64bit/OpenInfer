@@ -99,7 +99,6 @@ func newTestEnv(t *testing.T, fakeExe string) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
 
 	hub := api.NewHub()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -109,6 +108,23 @@ func newTestEnv(t *testing.T, fakeExe string) *testEnv {
 	lib := models.NewLibrary(db.DB, filepath.Join(dir, "models"), hub, log)
 	im := instances.NewManager(db.DB, rt, lib, hub, log,
 		filepath.Join(dir, "logs"), filepath.Join(dir, "temp"), filepath.Join(dir, "cache"))
+	t.Cleanup(func() {
+		im.StopAll()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if len(im.List()) == 0 {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		// Windows keeps an exclusive lock on a running .exe until the
+		// process handle is fully released; give the OS a moment so
+		// t.TempDir cleanup can delete the fake llama-server binary.
+		if runtime.GOOS == "windows" {
+			time.Sleep(200 * time.Millisecond)
+		}
+		db.Close()
+	})
 
 	// Register the fake runtime through the real import path (probes the exe).
 	rtID, err := rt.ImportCustom(fakeExe)
