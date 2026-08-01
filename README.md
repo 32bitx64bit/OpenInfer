@@ -14,8 +14,8 @@ See *Known limitations* below.
 |---|---|---|
 | Linux x86_64 | primary | AppImage via `packaging/linux/build-appimage.sh` |
 | Windows x86_64 | supported | `.exe` installer + portable zip |
-| macOS arm64 | supported | `.dmg` via `packaging/macos/build-bundle.sh` |
-| macOS x86_64 | supported | CPU builds |
+| macOS arm64 | supported | `.dmg` via `packaging/macos/build-bundle.sh arm64` |
+| macOS x86_64 | supported | `.dmg` via `packaging/macos/build-bundle.sh x86_64` |
 
 ## Architecture
 
@@ -104,13 +104,14 @@ to trigger `.github/workflows/release.yml`, which publishes:
 
 - Linux: `OpenInferStudio-*-linux-x86_64.AppImage`
 - Windows: `OpenInferStudio-*-windows-x86_64-setup.exe` (+ portable `.zip`)
-- macOS: `OpenInferStudio-*-macos-arm64.dmg`
+- macOS: `OpenInferStudio-*-macos-arm64.dmg` and `OpenInferStudio-*-macos-x86_64.dmg`
 
 Local packaging (on each OS):
 
 ```bash
 ./packaging/linux/build-appimage.sh
-./packaging/macos/build-bundle.sh
+./packaging/macos/build-bundle.sh arm64
+./packaging/macos/build-bundle.sh x86_64
 pwsh ./packaging/windows/build-installer.ps1
 ```
 

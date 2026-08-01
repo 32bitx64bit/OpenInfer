@@ -103,8 +103,12 @@ jobs:
             dist/windows/*.zip
 
   macos:
-    name: macOS DMG
+    name: macOS DMG (${{ matrix.arch }})
     needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -126,15 +130,15 @@ jobs:
               sed -i '' 's/-framework AGL//g' "$f"
             fi
           done < <(find "$QT_ROOT_DIR" -type f -name '*.cmake' -print0 2>/dev/null || true)
-      - name: Build DMG
+      - name: Build DMG (${{ matrix.arch }})
         shell: bash
         run: |
           chmod +x packaging/macos/build-bundle.sh
-          ./packaging/macos/build-bundle.sh
+          ./packaging/macos/build-bundle.sh "${{ matrix.arch }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: release-macos
-          path: dist/macos/*.dmg
+          name: release-macos-${{ matrix.arch }}
+          path: dist/macos-${{ matrix.arch }}/*.dmg
 
   publish:
     name: GitHub Release
