@@ -57,12 +57,20 @@ if (-not $iscc) {
 }
 
 Write-Host "==> Inno Setup ($iscc)"
+# Inno resolves relative Source/OutputDir paths against the .iss file
+# directory, not the process cwd — always pass absolute paths.
+$PayloadAbs = (Resolve-Path $Payload).Path
+$OutDirAbs = (Resolve-Path $OutDir).Path
+$IssAbs = (Resolve-Path "packaging\windows\openinfer.iss").Path
+Write-Host "    payload=$PayloadAbs"
+Write-Host "    output=$OutDirAbs"
 & $iscc `
     "/DMyAppVersion=$Version" `
-    "/DMyAppDir=$Payload" `
-    "/DMyOutputDir=$OutDir" `
-    "packaging\windows\openinfer.iss"
+    "/DMyAppDir=$PayloadAbs" `
+    "/DMyOutputDir=$OutDirAbs" `
+    $IssAbs
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
 
-$Setup = "$OutDir\OpenInferStudio-$Version-windows-x86_64-setup.exe"
+$Setup = Join-Path $OutDirAbs "OpenInferStudio-$Version-windows-x86_64-setup.exe"
+if (-not (Test-Path $Setup)) { throw "installer missing: $Setup" }
 Write-Host "Installer: $Setup"

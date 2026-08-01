@@ -1,15 +1,16 @@
 ; OpenInfer Studio — Inno Setup installer script.
 ; Built by packaging/windows/build-installer.ps1
-; Pass /DMyAppVersion=1.0.0 /DMyAppDir=... /DMyOutputDir=...
+; Always pass absolute /DMyAppDir and /DMyOutputDir (Inno resolves relative
+; paths against this .iss file's directory, not the caller's cwd).
 
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
 #endif
 #ifndef MyAppDir
-  #define MyAppDir "..\..\dist\windows\payload"
+  #error MyAppDir must be set to an absolute payload path via /DMyAppDir=...
 #endif
 #ifndef MyOutputDir
-  #define MyOutputDir "..\..\dist\windows"
+  #error MyOutputDir must be set to an absolute output path via /DMyOutputDir=...
 #endif
 
 [Setup]
