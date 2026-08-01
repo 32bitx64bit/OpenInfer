@@ -75,19 +75,22 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          # macOS 15+/Tahoe SDKs removed AGL; Qt < 6.8.4 / < 6.9.2 still
-          # injects -framework AGL via FindWrapOpenGL.cmake.
+          # macOS 15+/Tahoe SDKs removed AGL; older Qt still injects
+          # -framework AGL via FindWrapOpenGL.cmake. Qt 6.9.2+ may already
+          # be clean — treat "nothing to patch" as success.
           if [ -z "${QT_ROOT_DIR:-}" ]; then
             echo "QT_ROOT_DIR not set; skipping AGL patch"
             exit 0
           fi
-          find "$QT_ROOT_DIR" \( -name 'FindWrapOpenGL.cmake' -o -name '*.cmake' \) \
-            -print0 2>/dev/null \
-            | xargs -0 grep -l -- '-framework AGL' 2>/dev/null \
-            | while read -r f; do
-                echo "patching $f"
-                sed -i '' 's/-framework AGL//g' "$f"
-              done
+          patched=0
+          while IFS= read -r -d '' f; do
+            if grep -q -- '-framework AGL' "$f" 2>/dev/null; then
+              echo "patching $f"
+              sed -i '' 's/-framework AGL//g' "$f"
+              patched=$((patched + 1))
+            fi
+          done < <(find "$QT_ROOT_DIR" -type f \( -name 'FindWrapOpenGL.cmake' -o -name '*.cmake' \) -print0 2>/dev/null || true)
+          echo "AGL patch complete ($patched file(s))"
 
       - name: MSVC developer command prompt
         if: runner.os == 'Windows'
@@ -122,12 +125,11 @@ jobs:
           # Belt-and-suspenders: strip any residual AGL flags from the
           # generated build files (Qt may re-inject them at configure time).
           if [ "${{ runner.os }}" = "macOS" ]; then
-            find build -type f \( -name 'link.txt' -o -name 'build.ninja' -o -name 'flags.make' \) \
-              -exec grep -l -- '-framework AGL' {} \; 2>/dev/null \
-              | while read -r f; do
-                  echo "stripping AGL from $f"
-                  sed -i '' 's/-framework AGL//g' "$f"
-                done
+            while IFS= read -r f; do
+              echo "stripping AGL from $f"
+              sed -i '' 's/-framework AGL//g' "$f"
+            done < <(find build -type f \( -name 'link.txt' -o -name 'build.ninja' -o -name 'flags.make' \) \
+              -exec grep -l -- '-framework AGL' {} \; 2>/dev/null || true)
           fi
 
       - name: Build desktop
