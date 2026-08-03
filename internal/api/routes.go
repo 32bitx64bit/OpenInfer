@@ -8,6 +8,7 @@ import (
 	"github.com/openinfer/openinfer-studio/internal/database"
 	"github.com/openinfer/openinfer-studio/internal/diagnostics"
 	"github.com/openinfer/openinfer-studio/internal/downloads"
+	"github.com/openinfer/openinfer-studio/internal/hostit"
 	"github.com/openinfer/openinfer-studio/internal/huggingface"
 	"github.com/openinfer/openinfer-studio/internal/instances"
 	"github.com/openinfer/openinfer-studio/internal/models"
@@ -28,6 +29,7 @@ type Deps struct {
 	IM       *instances.Manager
 	Chat     *chat.Service
 	Proxy    *proxy.Server
+	HostIt   *hostit.Bridge
 	Logs     *diagnostics.Manager
 }
 
@@ -104,6 +106,10 @@ func (s *Server) RegisterRoutes(d *Deps) {
 	s.Handle("POST /api/v1/server/stop", h.serverStop)
 	s.Handle("POST /api/v1/server/regenerate-key", h.serverRegenKey)
 	s.Handle("GET /api/v1/server/requests", h.serverRequests)
+
+	s.Handle("GET /api/v1/hostit", h.getHostIt)
+	s.Handle("PUT /api/v1/hostit", h.putHostIt)
+	s.Handle("POST /api/v1/hostit/sync", h.syncHostIt)
 
 	s.Handle("GET /api/v1/logs/files", h.logFiles)
 	s.Handle("GET /api/v1/logs/tail", h.logTail)

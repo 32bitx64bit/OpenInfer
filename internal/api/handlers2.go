@@ -654,7 +654,15 @@ func (h *handlers) putServer(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid server config", err)
 		return
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true, "restart_required": h.d.Proxy.Running()})
+	// If the public API is already running and HostIt is enabled, refresh
+	// the tunnel against the (possibly new) local port.
+	if h.d.HostIt != nil && h.d.Proxy.Running() {
+		_ = h.d.HostIt.SyncTimeout(h.d.Proxy.Config().Port, true)
+	}
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "config": h.d.Proxy.Config(),
+		"restart_required": h.d.Proxy.Running(),
+	})
 }
 
 func (h *handlers) serverStart(w http.ResponseWriter, r *http.Request) {
@@ -662,12 +670,72 @@ func (h *handlers) serverStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "starting server failed", err)
 		return
 	}
+	if h.d.HostIt != nil {
+		if err := h.d.HostIt.SyncTimeout(h.d.Proxy.Config().Port, true); err != nil {
+			// Public API is up; HostIt failure is reported but not fatal.
+			writeJSON(w, 200, map[string]any{"ok": true, "hostit_error": err.Error()})
+			return
+		}
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (h *handlers) serverStop(w http.ResponseWriter, r *http.Request) {
+	if h.d.HostIt != nil {
+		_ = h.d.HostIt.SyncTimeout(0, false)
+	}
 	h.d.Proxy.Stop()
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (h *handlers) getHostIt(w http.ResponseWriter, r *http.Request) {
+	if h.d.HostIt == nil {
+		writeJSON(w, 200, map[string]any{"enabled": false, "available": false})
+		return
+	}
+	writeJSON(w, 200, h.d.HostIt.Status(r.Context()))
+}
+
+func (h *handlers) putHostIt(w http.ResponseWriter, r *http.Request) {
+	if h.d.HostIt == nil {
+		writeErr(w, 500, "hostit bridge unavailable", nil)
+		return
+	}
+	var req struct {
+		Enabled   bool   `json:"enabled"`
+		AgentURL  string `json:"agent_url"`
+		Domain    string `json:"domain"`
+		RouteName string `json:"route_name"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	h.d.HostIt.SetConfig(req.Enabled, req.AgentURL, req.Domain, req.RouteName)
+	running := h.d.Proxy.Running()
+	err := h.d.HostIt.SyncTimeout(h.d.Proxy.Config().Port, running)
+	out := h.d.HostIt.Status(r.Context())
+	out["ok"] = err == nil
+	if err != nil {
+		out["sync_error"] = err.Error()
+	}
+	writeJSON(w, 200, out)
+}
+
+func (h *handlers) syncHostIt(w http.ResponseWriter, r *http.Request) {
+	if h.d.HostIt == nil {
+		writeErr(w, 500, "hostit bridge unavailable", nil)
+		return
+	}
+	running := h.d.Proxy.Running()
+	err := h.d.HostIt.SyncTimeout(h.d.Proxy.Config().Port, running)
+	out := h.d.HostIt.Status(r.Context())
+	out["ok"] = err == nil
+	if err != nil {
+		out["sync_error"] = err.Error()
+		writeJSON(w, 200, out)
+		return
+	}
+	writeJSON(w, 200, out)
 }
 
 func (h *handlers) serverRegenKey(w http.ResponseWriter, r *http.Request) {

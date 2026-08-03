@@ -24,6 +24,7 @@ import (
 	"github.com/openinfer/openinfer-studio/internal/diagnostics"
 	"github.com/openinfer/openinfer-studio/internal/downloads"
 	"github.com/openinfer/openinfer-studio/internal/hardware"
+	"github.com/openinfer/openinfer-studio/internal/hostit"
 	"github.com/openinfer/openinfer-studio/internal/huggingface"
 	"github.com/openinfer/openinfer-studio/internal/instances"
 	"github.com/openinfer/openinfer-studio/internal/models"
@@ -169,9 +170,12 @@ func main() {
 	if err := px.LoadProfile(); err != nil {
 		log.Warn("loading server profile failed", "err", err)
 	}
+	hostIt := hostit.NewBridge(settings, logs.Logger("hostit", slog.LevelInfo).Logger)
 	if px.Config().Autostart {
 		if err := px.Start(); err != nil {
 			log.Warn("autostarting public API failed", "err", err)
+		} else if err := hostIt.SyncTimeout(px.Config().Port, true); err != nil {
+			log.Warn("hostit sync on autostart failed", "err", err)
 		}
 	}
 
@@ -179,7 +183,7 @@ func main() {
 	srv := api.NewServer(auth.Token(*tokenFlag), hub, logs.Logger("api", slog.LevelInfo).Logger)
 	srv.RegisterRoutes(&api.Deps{
 		Hub: hub, Layout: layout, DB: db, Settings: settings, HF: hf, DL: dl,
-		RT: rt, Lib: lib, IM: im, Chat: chatSvc, Proxy: px, Logs: logs,
+		RT: rt, Lib: lib, IM: im, Chat: chatSvc, Proxy: px, HostIt: hostIt, Logs: logs,
 	})
 	if err := srv.Start(*portFlag); err != nil {
 		fmt.Fprintf(os.Stderr, `{"ready":false,"error":%q}`+"\n", "bind: "+err.Error())
@@ -202,7 +206,7 @@ func main() {
 	// processes (and this backend) are never abandoned.
 	if *ppidFlag > 0 {
 		go watchParent(*ppidFlag, log, func() {
-			shutdown(log, im, px, srv)
+			shutdown(log, im, px, hostIt, srv)
 			os.Exit(0)
 		})
 	}
@@ -211,11 +215,14 @@ func main() {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
-	shutdown(log, im, px, srv)
+	shutdown(log, im, px, hostIt, srv)
 }
 
-func shutdown(log *diagnostics.Logger, im *instances.Manager, px *proxy.Server, srv *api.Server) {
+func shutdown(log *diagnostics.Logger, im *instances.Manager, px *proxy.Server, hi *hostit.Bridge, srv *api.Server) {
 	log.Info("shutting down")
+	if hi != nil {
+		_ = hi.SyncTimeout(0, false)
+	}
 	px.Stop()
 	im.StopAll()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
