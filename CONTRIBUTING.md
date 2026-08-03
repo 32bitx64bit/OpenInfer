@@ -2,10 +2,11 @@
 
 ## Ground rules
 
+- Contributions are accepted under the project's
+  [AGPL-3.0](LICENSE) license.
 - The C++ bootstrap stays minimal. Logic belongs in Go or QML.
 - `gofmt -w .` and `go vet ./...` must pass; add tests for new behavior.
 - No telemetry, no hidden network calls, no new heavyweight dependencies.
-- Never copy LM Studio assets, branding, or design.
 - Do not invent llama.cpp capabilities: expose what the runtime's `--help`
   advertises.
 - Keep user-facing errors honest: show the underlying error.

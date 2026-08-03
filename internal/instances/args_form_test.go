@@ -17,11 +17,14 @@ const newHelp = `
 --api-key KEY
 --draft, --draft-n, --draft-max N       the argument has been removed. use --spec-draft-n-max or
 --spec-draft-n-max N                    max draft tokens
+--spec-draft-n-min N                    min draft tokens
+--spec-type TYPE                        speculative decoding type
 -md,   --model-draft FNAME              draft model
+--parallel N
 `
 
 var newCaps = []string{"flash-attn", "gpu-layers", "ctx-size", "threads", "host", "port",
-	"api-key", "draft-max", "model-draft"}
+	"api-key", "draft-max", "draft-min", "model-draft", "spec-type", "parallel"}
 
 func argVal(t *testing.T, args []string, flag string) string {
 	t.Helper()
@@ -90,5 +93,80 @@ func TestRemovedFlagFallsForward(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--spec-draft-n-max 8") {
 		t.Errorf("want fallback --spec-draft-n-max 8 in %q", joined)
+	}
+}
+
+func TestSpecTypeAutoWhenDraftSet(t *testing.T) {
+	s := DefaultSettings()
+	s.DraftModel = "/draft.gguf"
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-simple" {
+		t.Errorf("auto spec-type = %q, want draft-simple; args=%v", got, br.Args)
+	}
+	if got := argVal(t, br.Args, "--model-draft"); got != "/draft.gguf" {
+		t.Errorf("draft model = %q", got)
+	}
+}
+
+func TestSpecTypeMTPSidecar(t *testing.T) {
+	s := DefaultSettings()
+	s.DraftModel = "/models/mtp-Qwen3.6-27B.gguf"
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-mtp" {
+		t.Errorf("mtp sidecar → draft-mtp, got %q in %v", got, br.Args)
+	}
+	if got := argVal(t, br.Args, "--parallel"); got != "1" {
+		t.Errorf("speculative load must pin --parallel 1 when unset, got %q", got)
+	}
+}
+
+func TestSpecTypeFromStaleCapsViaHelp(t *testing.T) {
+	// Caps without "spec-type" (install before we recognized the flag).
+	stale := []string{"flash-attn", "gpu-layers", "ctx-size", "threads", "host", "port",
+		"api-key", "draft-max", "model-draft", "parallel"}
+	s := DefaultSettings()
+	s.DraftModel = "/models/mtp-gemma-4-12B-it.gguf"
+	br := BuildArgs(s, "/m.gguf", "", stale, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-mtp" {
+		t.Errorf("stale caps + help must still emit --spec-type draft-mtp, got %q in %v", got, br.Args)
+	}
+}
+
+func TestSpecTypeExplicit(t *testing.T) {
+	s := DefaultSettings()
+	s.DraftModel = "/draft.gguf"
+	s.SpecType = "draft-eagle3"
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-eagle3" {
+		t.Errorf("spec-type = %q", got)
+	}
+}
+
+func TestSpecTypeMTPWithoutDraft(t *testing.T) {
+	s := DefaultSettings()
+	s.SpecType = "draft-mtp"
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-mtp" {
+		t.Errorf("fused mtp: %q", got)
+	}
+	joined := strings.Join(br.Args, " ")
+	if strings.Contains(joined, "--model-draft") || strings.Contains(joined, "--spec-draft-model") {
+		t.Errorf("fused mtp must not invent a draft path: %q", joined)
+	}
+}
+
+func TestParallelWarnWithDraft(t *testing.T) {
+	s := DefaultSettings()
+	s.DraftModel = "/draft.gguf"
+	s.Parallel = 4
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	found := false
+	for _, w := range br.Warnings {
+		if strings.Contains(w, "parallel") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected parallel warning, got %v", br.Warnings)
 	}
 }

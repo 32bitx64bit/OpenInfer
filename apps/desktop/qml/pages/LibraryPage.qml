@@ -20,8 +20,17 @@ Item {
     property var selected: null
 
     function modalityTag(m) {
-        if (!m || m.projector_path === "") return ""
+        if (!m) return ""
         var meta = m.metadata || {}
+        if (meta.speculative_draft) {
+            if (meta.spec_type === "draft-mtp" || meta.has_mtp) return "mtp draft"
+            if (meta.spec_type) return String(meta.spec_type).replace("draft-", "") + " draft"
+            return "draft"
+        }
+        if (m.projector_path === "") {
+            if (meta.has_mtp) return "mtp"
+            return ""
+        }
         var hasA = !!meta.has_audio
         var hasV = !!meta.has_vision
         if (page.experimentalAudio) {

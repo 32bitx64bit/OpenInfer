@@ -7,9 +7,13 @@ import (
 // DetectModalities infers audio / vision capabilities from Hugging Face
 // pipeline tags, repo tags, and repository id heuristics. Returns a stable
 // ordered slice: "audio" and/or "vision". Empty means unknown (text-only or
-// insufficient signals).
+// insufficient signals). Speculative draft / speculator repos are never
+// labeled multimodal — they are companions to a target model, not chat models.
 func DetectModalities(repoID, pipelineTag string, tags []string) []string {
 	lowerID := strings.ToLower(repoID)
+	if looksLikeSpeculativeDraftRepo(lowerID, tags) {
+		return nil
+	}
 	lowerPipe := strings.ToLower(pipelineTag)
 	tagSet := map[string]bool{}
 	for _, t := range tags {
@@ -85,6 +89,27 @@ func DetectModalities(repoID, pipelineTag string, tags []string) []string {
 		out = append(out, "vision")
 	}
 	return out
+}
+
+func looksLikeSpeculativeDraftRepo(lowerID string, tags []string) bool {
+	// Official llama.cpp sidecar prefixes in repo ids / file names.
+	for _, h := range []string{
+		"/mtp-", "mtp-", "eagle3-", "dflash-", "dspark-",
+		"eagle3", "eagle-3", "dflash", "dspark", "speculator",
+		"draft-eagle", "draft-dflash", "draft-mtp", "spec-draft",
+	} {
+		if strings.Contains(lowerID, h) {
+			return true
+		}
+	}
+	for _, t := range tags {
+		lt := strings.ToLower(t)
+		if lt == "speculative-decoding" || lt == "eagle3" || lt == "dflash" ||
+			lt == "dspark" || lt == "mtp" || lt == "speculator" || lt == "draft-model" {
+			return true
+		}
+	}
+	return false
 }
 
 // ModalityLabel returns a short UI label for a modalities slice.

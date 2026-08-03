@@ -17,25 +17,27 @@ import "strings"
 
 // Estimate breaks down projected memory use for one configuration.
 type Estimate struct {
-	WeightsBytes   int64  `json:"weights_bytes"`
-	ProjectorBytes int64  `json:"projector_bytes"`
-	KVCacheBytes   int64  `json:"kv_cache_bytes"`
-	RecurrentBytes int64  `json:"recurrent_bytes"` // hybrid SSM / linear-attn state
-	ComputeBytes   int64  `json:"compute_bytes"`
-	MediaBytes     int64  `json:"media_bytes"` // multimodal encoder activations
-	OverheadBytes  int64  `json:"overhead_bytes"`
-	TotalBytes     int64  `json:"total_bytes"`
-	GPUBytes       int64  `json:"gpu_bytes"`
-	CPUBytes       int64  `json:"cpu_bytes"`
-	BudgetBytes    uint64 `json:"budget_bytes"`
-	BudgetKind     string `json:"budget_kind"` // "VRAM", "unified RAM", "RAM"
-	Fits           bool   `json:"fits"`
-	Note           string `json:"note"`
+	WeightsBytes      int64  `json:"weights_bytes"`
+	DraftWeightsBytes int64  `json:"draft_weights_bytes"`
+	ProjectorBytes    int64  `json:"projector_bytes"`
+	KVCacheBytes      int64  `json:"kv_cache_bytes"`
+	RecurrentBytes    int64  `json:"recurrent_bytes"` // hybrid SSM / linear-attn state
+	ComputeBytes      int64  `json:"compute_bytes"`
+	MediaBytes        int64  `json:"media_bytes"` // multimodal encoder activations
+	OverheadBytes     int64  `json:"overhead_bytes"`
+	TotalBytes        int64  `json:"total_bytes"`
+	GPUBytes          int64  `json:"gpu_bytes"`
+	CPUBytes          int64  `json:"cpu_bytes"`
+	BudgetBytes       uint64 `json:"budget_bytes"`
+	BudgetKind        string `json:"budget_kind"` // "VRAM", "unified RAM", "RAM"
+	Fits              bool   `json:"fits"`
+	Note              string `json:"note"`
 }
 
 // EstimateInput collects everything EstimateMemory needs.
 type EstimateInput struct {
 	Weights           int64
+	DraftWeights      int64 // speculative draft GGUF size
 	Projector         int64
 	Layers            uint32
 	KVHeads           uint32
@@ -103,7 +105,8 @@ func EstimateMemory(in EstimateInput) Estimate {
 	}
 
 	est := Estimate{
-		WeightsBytes: in.Weights,
+		WeightsBytes:      in.Weights,
+		DraftWeightsBytes: in.DraftWeights,
 	}
 	projector := in.Projector
 	if in.NoMmproj {
@@ -120,7 +123,7 @@ func EstimateMemory(in EstimateInput) Estimate {
 
 	// Compute / activation scratch — keep modest; llama.cpp graph workspace
 	// is typically hundreds of MiB, not a large fraction of weights.
-	weightBase := in.Weights + projector
+	weightBase := in.Weights + in.DraftWeights + projector
 	compute := weightBase / 40
 	if compute < 256<<20 {
 		compute = 256 << 20
@@ -168,8 +171,8 @@ func EstimateMemory(in EstimateInput) Estimate {
 	}
 
 	est.OverheadBytes = 128 << 20
-	est.TotalBytes = est.WeightsBytes + est.ProjectorBytes + est.KVCacheBytes +
-		est.RecurrentBytes + est.ComputeBytes + est.MediaBytes + est.OverheadBytes
+	est.TotalBytes = est.WeightsBytes + est.DraftWeightsBytes + est.ProjectorBytes +
+		est.KVCacheBytes + est.RecurrentBytes + est.ComputeBytes + est.MediaBytes + est.OverheadBytes
 
 	switch {
 	case in.GPUOffload && in.VRAM > 0:
@@ -192,13 +195,14 @@ func EstimateMemory(in EstimateInput) Estimate {
 	projOnGPU := in.GPUOffload && projector > 0 && !in.NoMmprojOffload
 	mediaOnGPU := projOnGPU
 
-	// Partial offload: split weights + KV by layer share.
+	// Partial offload: split weights + KV by layer share. Draft weights follow
+	// the same GPU/CPU split as the target (llama.cpp loads both in-process).
 	if in.GPUOffload && in.Layers > 0 && in.OffloadedLayers > 0 && in.OffloadedLayers < in.Layers {
 		frac := float64(in.OffloadedLayers) / float64(in.Layers)
-		gpuW := int64(frac * float64(est.WeightsBytes))
+		gpuW := int64(frac * float64(est.WeightsBytes+est.DraftWeightsBytes))
 		gpuKV := int64(frac * float64(est.KVCacheBytes+est.RecurrentBytes))
 		est.GPUBytes = gpuW + gpuKV + est.ComputeBytes + est.OverheadBytes
-		est.CPUBytes = (est.WeightsBytes - gpuW) + (est.KVCacheBytes + est.RecurrentBytes - gpuKV)
+		est.CPUBytes = (est.WeightsBytes + est.DraftWeightsBytes - gpuW) + (est.KVCacheBytes + est.RecurrentBytes - gpuKV)
 		if projOnGPU {
 			est.GPUBytes += est.ProjectorBytes
 		} else {

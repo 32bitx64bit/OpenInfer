@@ -38,6 +38,7 @@ Dialog {
         "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
         "rope_scaling": "", "alias": "", "raw_args": "",
         "jinja": false, "no_mmproj": false, "no_mmproj_offload": false,
+        "draft_model": "", "draft_max": 0, "draft_min": 0, "spec_type": "",
         "runtime_id": "",
         "save_on_success": true
     })
@@ -45,12 +46,21 @@ Dialog {
     property var preview: null
     property var estimate: null
     property string loadError: ""
+    property var draftCandidates: []
+    property bool draftFiltered: true
     readonly property bool hasProjector: root.model && root.model.projector_path !== ""
+    readonly property bool speculativeEnabled: !!(root.settings.draft_model && root.settings.draft_model !== "")
+            || !!(root.settings.spec_type && root.settings.spec_type !== "")
+    readonly property bool hasMTP: {
+        if (!root.model || !root.model.metadata) return false
+        return !!root.model.metadata.has_mtp
+    }
 
     function isMultimodal(m) {
         if (!m) return false
-        if (m.projector_path && m.projector_path !== "") return true
         var meta = m.metadata || {}
+        if (meta.speculative_draft) return false
+        if (m.projector_path && m.projector_path !== "") return true
         return !!(meta.multimodal || meta.has_audio || meta.has_vision)
     }
 
@@ -66,6 +76,7 @@ Dialog {
             "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
             "rope_scaling": "", "alias": m.alias || "", "raw_args": "",
             "jinja": root.isMultimodal(m), "no_mmproj": false, "no_mmproj_offload": false,
+            "draft_model": "", "draft_max": 0, "draft_min": 0, "spec_type": "",
             "runtime_id": m.pinned_runtime || "",
             "save_on_success": true
         }
@@ -75,9 +86,11 @@ Dialog {
         loadError = ""
         preview = null
         estimate = null
+        draftCandidates = []
         api.get("/api/v1/runtimes", function(st, data) {
             if (st === 200) root.runtimes = (data && data.runtimes) || []
         })
+        root.reloadDraftCandidates()
         api.get("/api/v1/models/" + m.id + "/presets", function(st, data) {
             if (st !== 200) return
             // Ignore stale responses if the user opened another model.
@@ -139,6 +152,45 @@ Dialog {
         settings[key] = value
         settingsChanged()
         scheduleRefresh()
+    }
+
+    function reloadDraftCandidates() {
+        if (!root.modelId) return
+        var id = root.modelId
+        api.get("/api/v1/models/" + id + "/draft-candidates", function(st, data) {
+            if (st !== 200 || root.modelId !== id) return
+            root.draftCandidates = (data && data.candidates) || []
+            root.draftFiltered = !data || data.filtered !== false
+        })
+    }
+
+    function draftChoices() {
+        var none = { "id": "", "alias": "None (disabled)", "primary_path": "", "quantization": "", "compatible": true }
+        var list = [none].concat(root.draftCandidates || [])
+        var path = root.settings.draft_model || ""
+        if (path === "") return list
+        for (var i = 0; i < list.length; i++) {
+            if ((list[i].primary_path || "") === path) return list
+        }
+        // Preset / manual path not in the filtered set — keep it selectable.
+        list.push({
+            "id": "_selected",
+            "alias": path.split("/").pop() || path,
+            "primary_path": path,
+            "quantization": "",
+            "compatible": false,
+            "reason": "not in filtered candidates"
+        })
+        return list
+    }
+
+    function draftIndex() {
+        var path = root.settings.draft_model || ""
+        var m = root.draftChoices()
+        for (var i = 0; i < m.length; i++) {
+            if ((m[i].primary_path || "") === path) return i
+        }
+        return 0
     }
 
     function applyPreset(p) {
@@ -248,6 +300,8 @@ Dialog {
                                 var e = root.estimate
                                 var parts = []
                                 parts.push("weights " + AppTheme.bytes(e.weights_bytes || 0))
+                                if ((e.draft_weights_bytes || 0) > 0)
+                                    parts.push("draft " + AppTheme.bytes(e.draft_weights_bytes))
                                 if ((e.projector_bytes || 0) > 0)
                                     parts.push("mmproj " + AppTheme.bytes(e.projector_bytes))
                                 parts.push("KV " + AppTheme.bytes(e.kv_cache_bytes || 0))
@@ -450,6 +504,120 @@ Dialog {
                         from: 0; to: 64; editable: true
                         value: root.settings.parallel
                         onValueModified: root.setSetting("parallel", value)
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    visible: root.hasMTP
+                    label: "Built-in MTP"
+                    hint: "This GGUF includes NextN / Multi-Token Prediction heads. Enable draft-mtp without a separate draft file (llama.cpp --spec-type draft-mtp)."
+                    argName: "--spec-type"
+                    Switch {
+                        checked: root.settings.spec_type === "draft-mtp" && !root.settings.draft_model
+                        onToggled: {
+                            if (checked) {
+                                root.setSetting("draft_model", "")
+                                root.setSetting("spec_type", "draft-mtp")
+                            } else if (root.settings.spec_type === "draft-mtp") {
+                                root.setSetting("spec_type", "")
+                            }
+                        }
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    label: "Speculative draft"
+                    hint: root.draftFiltered
+                          ? "Only detected speculative drafts (mtp- / eagle3- / dflash- / dspark-). Turn off Settings → Filter draft model picker to choose any GGUF."
+                          : "All library models (filter off). Prefer official sidecars when available."
+                    argName: "--model-draft"
+                    ComboBox {
+                        id: draftCombo
+                        width: parent.width
+                        model: root.draftChoices()
+                        textRole: "alias"
+                        currentIndex: root.draftIndex()
+                        onActivated: function(i) {
+                            var item = model[i]
+                            var path = item.primary_path || ""
+                            root.setSetting("draft_model", path)
+                            if (path === "") {
+                                if (root.settings.spec_type !== "draft-mtp" || !root.hasMTP)
+                                    root.setSetting("spec_type", "")
+                                return
+                            }
+                            // Prefer library metadata / sidecar-inferred type (mtp-, eagle3-, …).
+                            var st = item.spec_type || (item.metadata && item.metadata.spec_type) || ""
+                            if (!st && item.metadata && item.metadata.has_mtp) st = "draft-mtp"
+                            if (!st && item.architecture === "eagle3") st = "draft-eagle3"
+                            if (!st && (item.architecture === "dflash" || item.architecture === "dflash-draft")) st = "draft-dflash"
+                            if (!st && item.architecture === "dspark") st = "draft-dspark"
+                            if (!st) {
+                                var base = (path.split("/").pop() || "").toLowerCase()
+                                if (base.indexOf("mtp-") === 0) st = "draft-mtp"
+                                else if (base.indexOf("eagle3-") === 0) st = "draft-eagle3"
+                                else if (base.indexOf("dflash-") === 0) st = "draft-dflash"
+                                else if (base.indexOf("dspark-") === 0) st = "draft-dspark"
+                                else st = "draft-simple"
+                            }
+                            root.setSetting("spec_type", st)
+                        }
+                        delegate: ItemDelegate {
+                            width: parent ? parent.width : implicitWidth
+                            text: {
+                                if (modelData.id === "") return modelData.alias
+                                var t = modelData.alias
+                                if (modelData.quantization) t += " · " + modelData.quantization
+                                var st = modelData.spec_type || (modelData.metadata && modelData.metadata.spec_type) || ""
+                                if (st) t += " · " + st
+                                if (modelData.compatible === false && modelData.reason)
+                                    t += "  (" + modelData.reason + ")"
+                                return t
+                            }
+                        }
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    visible: root.speculativeEnabled
+                    label: "Draft tokens (max)"
+                    hint: "Max tokens drafted per step. 0 = runtime default (typically 3–16)."
+                    argName: "--spec-draft-n-max"
+                    SpinBox {
+                        from: 0; to: 64; editable: true
+                        value: root.settings.draft_max || 0
+                        onValueModified: root.setSetting("draft_max", value)
+                    }
+                }
+
+                FormField {
+                    Layout.fillWidth: true
+                    visible: root.speculativeEnabled
+                    label: "Spec type"
+                    hint: "llama.cpp --spec-type. Auto-selected from mtp-/eagle3-/dflash-/dspark- sidecars and draft architecture."
+                    argName: "--spec-type"
+                    ComboBox {
+                        model: [
+                            { "text": "draft-simple", "value": "draft-simple" },
+                            { "text": "draft-eagle3", "value": "draft-eagle3" },
+                            { "text": "draft-dflash", "value": "draft-dflash" },
+                            { "text": "draft-dspark", "value": "draft-dspark" },
+                            { "text": "draft-mtp", "value": "draft-mtp" },
+                            { "text": "ngram-mod", "value": "ngram-mod" },
+                            { "text": "ngram-simple", "value": "ngram-simple" },
+                            { "text": "ngram-cache", "value": "ngram-cache" }
+                        ]
+                        textRole: "text"
+                        currentIndex: {
+                            var v = root.settings.spec_type || "draft-simple"
+                            for (var i = 0; i < model.length; i++)
+                                if (model[i].value === v) return i
+                            return 0
+                        }
+                        onActivated: function(i) { root.setSetting("spec_type", model[i].value) }
                     }
                 }
 

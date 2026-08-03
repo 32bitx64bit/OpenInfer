@@ -56,8 +56,12 @@ type Metadata struct {
 	Multimodal            bool           `json:"multimodal"`
 	HasVision             bool           `json:"has_vision"`
 	HasAudio              bool           `json:"has_audio"`
-	Projector             bool           `json:"projector"` // looks like an mmproj file
-	Raw                   map[string]any `json:"-"`         // full kv for future use, not serialized to UI
+	Projector             bool           `json:"projector"`         // looks like an mmproj file
+	SpeculativeDraft      bool           `json:"speculative_draft"` // sidecar draft, not a chat model
+	HasMTP                bool           `json:"has_mtp"`           // NextN / MTP heads present
+	NextnPredictLayers    uint32         `json:"nextn_predict_layers,omitempty"`
+	SpecType              SpecType       `json:"spec_type,omitempty"` // preferred --spec-type when used as draft
+	Raw                   map[string]any `json:"-"`                   // full kv for future use, not serialized to UI
 }
 
 // Errors that callers can classify.
@@ -503,6 +507,9 @@ func (md *Metadata) extract() {
 	if md.Architecture == "clip" {
 		md.Projector = true
 	}
+
+	// Speculative draft / MTP detection (path filled in by callers that have one).
+	md.ApplySpeculativeFlags("")
 }
 
 func toUint32(v any) (uint32, bool) {

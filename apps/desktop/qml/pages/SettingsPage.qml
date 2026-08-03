@@ -237,6 +237,14 @@ Item {
                             onToggled: page.setSetting("runtimes.update_checks", checked ? "1" : "0")
                         }
                     }
+                    FormField {
+                        label: "Filter draft model picker"
+                        hint: "When on (default), the load dialog only lists detected speculative drafts (mtp-, eagle3-, dflash-, dspark-, …). Turn off to pick any library GGUF as a draft-simple companion."
+                        Switch {
+                            checked: (page.settings["load.filter_incompatible_drafts"] || "1") !== "0"
+                            onToggled: page.setSetting("load.filter_incompatible_drafts", checked ? "1" : "0")
+                        }
+                    }
                 }
             }
 

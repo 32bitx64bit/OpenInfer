@@ -20,21 +20,24 @@ import (
 func main() {
 	fs := flag.NewFlagSet("llama-server", flag.ContinueOnError)
 	var (
-		version  = fs.Bool("version", false, "print version")
-		port     = fs.Int("port", 8080, "")
-		host     = fs.String("host", "127.0.0.1", "")
-		apiKey   = fs.String("api-key", "", "")
-		model    = fs.String("model", "", "")
-		alias    = fs.String("alias", "", "")
-		ctxSize  = fs.Int("ctx-size", 4096, "")
-		ngl      = fs.Int("n-gpu-layers", 0, "")
-		threads  = fs.Int("threads", 4, "")
-		fa       = fs.Bool("flash-attn", false, "")
-		mmproj   = fs.String("mmproj", "", "")
-		noMmproj = fs.Bool("no-mmproj", false, "")
-		parallel = fs.Int("parallel", 1, "")
-		batch    = fs.Int("batch-size", 2048, "")
-		cacheK   = fs.String("cache-type-k", "", "")
+		version    = fs.Bool("version", false, "print version")
+		port       = fs.Int("port", 8080, "")
+		host       = fs.String("host", "127.0.0.1", "")
+		apiKey     = fs.String("api-key", "", "")
+		model      = fs.String("model", "", "")
+		alias      = fs.String("alias", "", "")
+		ctxSize    = fs.Int("ctx-size", 4096, "")
+		ngl        = fs.Int("n-gpu-layers", 0, "")
+		threads    = fs.Int("threads", 4, "")
+		fa         = fs.Bool("flash-attn", false, "")
+		mmproj     = fs.String("mmproj", "", "")
+		noMmproj   = fs.Bool("no-mmproj", false, "")
+		modelDraft = fs.String("model-draft", "", "")
+		draftMax   = fs.Int("draft-max", 0, "")
+		specType   = fs.String("spec-type", "", "")
+		parallel   = fs.Int("parallel", 1, "")
+		batch      = fs.Int("batch-size", 2048, "")
+		cacheK     = fs.String("cache-type-k", "", "")
 	)
 	// llama.cpp-style --help exits 0 after printing usage.
 	fs.Usage = func() {
@@ -49,6 +52,11 @@ func main() {
          --cache-type-k TYPE
          --mmproj FILE
          --no-mmproj
+         --model-draft FILE
+         --spec-draft-model FILE
+         --draft-max N
+         --spec-draft-n-max N
+         --spec-type TYPE
          --host HOST
          --port PORT
          --api-key KEY
@@ -66,6 +74,9 @@ func main() {
 	_ = ctxSize
 	_ = mmproj
 	_ = noMmproj
+	_ = modelDraft
+	_ = draftMax
+	_ = specType
 
 	// Manual scan for --help since flag package treats it as error by default.
 	for _, a := range os.Args[1:] {

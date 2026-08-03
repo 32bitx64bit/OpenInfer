@@ -188,6 +188,24 @@ func decodeSettings(w http.ResponseWriter, r *http.Request) (instances.LoadSetti
 		writeErr(w, 400, "threads out of range", nil)
 		return s, false
 	}
+	if s.DraftMax < 0 || s.DraftMax > 256 {
+		writeErr(w, 400, "draft_max out of range", nil)
+		return s, false
+	}
+	if s.DraftMin < 0 || s.DraftMin > 256 {
+		writeErr(w, 400, "draft_min out of range", nil)
+		return s, false
+	}
+	if s.DraftModel != "" {
+		if !filepath.IsAbs(s.DraftModel) {
+			writeErr(w, 400, "draft_model must be an absolute path", nil)
+			return s, false
+		}
+		if st, err := os.Stat(s.DraftModel); err != nil || st.IsDir() {
+			writeErr(w, 400, "draft_model path does not exist", err)
+			return s, false
+		}
+	}
 	switch s.GPUOffload {
 	case "", "auto", "all", "none", "custom":
 	default:
@@ -215,6 +233,42 @@ func (h *handlers) previewLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, br)
+}
+
+// draftCandidates lists library models that can be used as a speculative
+// decoding draft for the target. With filtering on (default), only detected
+// speculative sidecars (mtp-/eagle3-/dflash-/dspark-/…) are returned. Pass
+// ?filter=0 or disable load.filter_incompatible_drafts to list every model.
+func (h *handlers) draftCandidates(w http.ResponseWriter, r *http.Request) {
+	target, err := h.d.Lib.Get(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 404, "model not found", err)
+		return
+	}
+	all, err := h.d.Lib.List()
+	if err != nil {
+		writeErr(w, 500, "listing models", err)
+		return
+	}
+	filter := true
+	switch r.URL.Query().Get("filter") {
+	case "0", "false", "off":
+		filter = false
+	case "1", "true", "on":
+		filter = true
+	default:
+		if h.d.Settings != nil && h.d.Settings.Get("load.filter_incompatible_drafts", "1") == "0" {
+			filter = false
+		}
+	}
+	cands := models.FilterDraftCandidates(*target, all, filter)
+	if cands == nil {
+		cands = []models.DraftCandidate{}
+	}
+	writeJSON(w, 200, map[string]any{
+		"candidates": cands,
+		"filtered":   filter,
+	})
 }
 
 // estimateLoad projects memory use for a settings draft against detected
@@ -291,6 +345,12 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 			proj = st.Size()
 		}
 	}
+	var draftWeights int64
+	if s.DraftModel != "" {
+		if st, err := os.Stat(s.DraftModel); err == nil {
+			draftWeights = st.Size()
+		}
+	}
 	// Resolve offloaded layer count for partial-offload estimation.
 	offloaded := meta.BlockCount
 	if s.GPUOffload == "custom" && s.GPULayers > 0 {
@@ -302,7 +362,7 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 		offloaded = 0
 	}
 	est := instances.EstimateMemory(instances.EstimateInput{
-		Weights: m.SizeBytes - proj, Projector: proj,
+		Weights: m.SizeBytes - proj, DraftWeights: draftWeights, Projector: proj,
 		Layers: meta.BlockCount, KVHeads: meta.HeadCountKV,
 		HeadCountKVLayers: meta.HeadCountKVLayers,
 		HeadDim:           meta.HeadDim, ValueDim: meta.ValueDim,
@@ -348,11 +408,15 @@ func (h *handlers) applyMultimodalDefaults(modelID string, s *instances.LoadSett
 		return
 	}
 	var meta struct {
-		HasAudio   bool `json:"has_audio"`
-		HasVision  bool `json:"has_vision"`
-		Multimodal bool `json:"multimodal"`
+		HasAudio         bool `json:"has_audio"`
+		HasVision        bool `json:"has_vision"`
+		Multimodal       bool `json:"multimodal"`
+		SpeculativeDraft bool `json:"speculative_draft"`
 	}
 	_ = json.Unmarshal(m.Metadata, &meta)
+	if meta.SpeculativeDraft {
+		return
+	}
 	if m.ProjectorPath != "" || meta.HasAudio || meta.HasVision || meta.Multimodal {
 		t := true
 		s.Jinja = &t

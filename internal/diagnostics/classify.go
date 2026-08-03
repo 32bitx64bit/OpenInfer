@@ -27,6 +27,7 @@ const (
 	ClassPortConflict       FailureClass = "port-conflict"
 	ClassPermission         FailureClass = "permission-error"
 	ClassInvalidPath        FailureClass = "invalid-path"
+	ClassDraftModel         FailureClass = "draft-model"
 	ClassRuntimeCrash       FailureClass = "runtime-crash"
 	ClassTimeout            FailureClass = "timeout"
 )
@@ -97,6 +98,9 @@ var rules = []rule{
 	{ClassInvalidPath, regexp.MustCompile(`(?i)(no such file or directory|ENOENT|failed to open.*model)`),
 		"A required file path does not exist.",
 		"Rescan the library; the model files may have moved."},
+	{ClassDraftModel, regexp.MustCompile(`(?i)(draft model|model.draft|spec.draft|speculative).*(failed|error|incompatible|mismatch|not found|vocab)`),
+		"The speculative decoding draft model failed to load or is incompatible with the target.",
+		"Pick a smaller draft of the same architecture and tokenizer, or disable draft filtering in Settings if using a specialized draft (EAGLE/DFlash)."},
 	{ClassTimeout, regexp.MustCompile(`(?i)(timed? ?out|deadline exceeded)`),
 		"The model did not become ready within the startup timeout.",
 		"Large models can take minutes on CPU; watch the live log, or increase the timeout in Settings."},

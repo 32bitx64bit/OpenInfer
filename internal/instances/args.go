@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/openinfer/openinfer-studio/internal/gguf"
 	"github.com/openinfer/openinfer-studio/internal/runtimes"
 )
 
@@ -42,8 +43,10 @@ type LoadSettings struct {
 	NoMmprojOffload bool              `json:"no_mmproj_offload"`
 	LoraPath        string            `json:"lora_path"`
 	LoraScale       float64           `json:"lora_scale"`
-	DraftModel      string            `json:"draft_model"`
-	DraftMax        int               `json:"draft_max"`
+	DraftModel      string            `json:"draft_model"` // path to draft GGUF
+	DraftMax        int               `json:"draft_max"`   // max draft tokens (0 = runtime default)
+	DraftMin        int               `json:"draft_min"`   // min draft tokens (0 = runtime default)
+	SpecType        string            `json:"spec_type"`   // e.g. draft-simple; empty = auto when draft set
 	ReasoningFormat string            `json:"reasoning_format"`
 	RawArgs         string            `json:"raw_args"`      // expert: space-separated, validated, never shell
 	EnvOverrides    map[string]string `json:"env_overrides"` // allowlisted keys only
@@ -209,7 +212,15 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 		res = append(res, Resolution{"Flash Attention", "auto", "enabled (safe on all current backends)"})
 	}
 
-	if s.Parallel > 0 {
+	// Speculative decoding (especially draft-mtp) needs a single slot. Recent
+	// llama-server defaults can be >1 when --parallel is omitted, which silently
+	// disables speculation — pin to 1 when unset and a draft/spec type is active.
+	speculative := s.DraftModel != "" || strings.TrimSpace(s.SpecType) != ""
+	switch {
+	case speculative && s.Parallel <= 0:
+		add("--parallel", "1")
+		res = append(res, Resolution{"Parallel slots", "auto for speculative", "1"})
+	case s.Parallel > 0:
 		add("--parallel", strconv.Itoa(s.Parallel))
 	}
 	if s.BatchSize > 0 {
@@ -291,11 +302,37 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 			add("--lora", s.LoraPath)
 		}
 	}
+
+	// Resolve speculative decoding. llama.cpp defaults --spec-type to none;
+	// without an explicit type a draft can load while speculation never runs.
+	specType := resolveSpecType(s)
 	if s.DraftModel != "" {
 		addFirst([]string{s.DraftModel}, "--model-draft", "--spec-draft-model")
+		if specType != "" {
+			if runtimes.SupportsFlag(caps, help, "--spec-type") {
+				add("--spec-type", specType)
+				label := "auto"
+				if strings.TrimSpace(s.SpecType) != "" {
+					label = "explicit"
+				}
+				res = append(res, Resolution{"Speculative type", label, specType})
+			} else if s.SpecType != "" {
+				warn = append(warn, "--spec-type is not supported by this runtime; setting skipped")
+			}
+		}
+		if s.Parallel > 1 {
+			warn = append(warn, "parallel slots > 1 often disable or weaken draft speculative decoding; use 1 for MTP/EAGLE")
+		}
+	} else if specType != "" {
+		// Fused-trunk MTP / ngram modes: --spec-type without a draft GGUF.
+		add("--spec-type", specType)
+		res = append(res, Resolution{"Speculative type", "explicit", specType})
 	}
 	if s.DraftMax > 0 {
 		addFirst([]string{strconv.Itoa(s.DraftMax)}, "--draft-max", "--spec-draft-n-max")
+	}
+	if s.DraftMin > 0 {
+		addFirst([]string{strconv.Itoa(s.DraftMin)}, "--draft-min", "--spec-draft-n-min")
 	}
 	if s.ReasoningFormat != "" {
 		add("--reasoning-format", s.ReasoningFormat)
@@ -340,6 +377,21 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	}
 
 	return BuildResult{Args: args, Command: quoteCommand(args), Resolutions: res, Warnings: warn}
+}
+
+// resolveSpecType picks --spec-type from explicit settings and draft GGUF signals
+// (official mtp-/eagle3-/dflash-/dspark- sidecars, dedicated arches, name hints).
+func resolveSpecType(s LoadSettings) string {
+	var draftSpec gguf.SpecType
+	if s.DraftModel != "" {
+		if md, err := gguf.ParseFile(s.DraftModel); err == nil {
+			md.ApplySpeculativeFlags(s.DraftModel)
+			draftSpec = md.SpecType
+		} else {
+			_, draftSpec = gguf.DetectSpeculativeDraft("", "", s.DraftModel, nil)
+		}
+	}
+	return string(gguf.InferSpecType(s.SpecType, s.DraftModel, draftSpec))
 }
 
 // quoteCommand renders the argument vector for the preview pane. It is

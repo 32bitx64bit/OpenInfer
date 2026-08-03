@@ -28,6 +28,25 @@ Item {
     property string pendingAudioPath: ""
     property string pendingAudioName: ""
 
+    function isSpeculativeDraft(m) {
+        if (!m) return false
+        var meta = m.metadata || {}
+        if (meta.speculative_draft) return true
+        // Path fallback if library metadata hasn't been rescanned yet.
+        var path = String(m.primary_path || m.alias || "").toLowerCase()
+        var base = path.split("/").pop() || path
+        return base.indexOf("mtp-") === 0
+            || base.indexOf("eagle3-") === 0
+            || base.indexOf("dflash-") === 0
+            || base.indexOf("dspark-") === 0
+    }
+
+    // Chat targets only — MTP/EAGLE/DFlash/DSpark sidecars belong in the
+    // load-dialog draft picker, not as conversation models.
+    function chatModels() {
+        return (page.library || []).filter(function(m) { return !page.isSpeculativeDraft(m) })
+    }
+
     function currentModel() {
         if (!page.currentConv) return null
         for (var i = 0; i < page.library.length; i++) {
@@ -38,6 +57,7 @@ Item {
     function modelSupportsAudio() {
         var m = page.currentModel()
         if (!m || !m.metadata) return false
+        if (m.metadata.speculative_draft) return false
         return !!m.metadata.has_audio
     }
     function canAttachAudio() {
@@ -84,9 +104,10 @@ Item {
     // Keep the selector aligned with the conversation's actual model,
     // including after the library reloads (which resets the combo).
     function syncModelSelector() {
-        if (!page.currentConv || page.library.length === 0) return
-        for (var i = 0; i < page.library.length; i++) {
-            if (page.library[i].id === page.currentConv.model_id) {
+        var models = page.chatModels()
+        if (!page.currentConv || models.length === 0) return
+        for (var i = 0; i < models.length; i++) {
+            if (models[i].id === page.currentConv.model_id) {
                 if (modelSelector.currentIndex !== i) modelSelector.currentIndex = i
                 return
             }
@@ -368,14 +389,16 @@ Item {
                     ComboBox {
                         id: modelSelector
                         Layout.preferredWidth: 280
-                        model: page.library
+                        model: page.chatModels()
                         textRole: "alias"
                         function currentModelId() {
-                            return currentIndex >= 0 && page.library.length ? page.library[currentIndex].id : ""
+                            var models = page.chatModels()
+                            return currentIndex >= 0 && models.length ? models[currentIndex].id : ""
                         }
                         onActivated: function(i) {
-                            if (!page.currentConv || !page.library.length) return
-                            var mid = page.library[i].id
+                            var models = page.chatModels()
+                            if (!page.currentConv || !models.length) return
+                            var mid = models[i].id
                             page.api.patch("/api/v1/chat/" + page.currentConv.id,
                                 { "model_id": mid }, function(st) {
                                     if (st === 200) {
@@ -389,8 +412,9 @@ Item {
                         }
                         Component.onCompleted: {
                             if (page.currentConv) {
-                                for (var i = 0; i < page.library.length; i++)
-                                    if (page.library[i].id === page.currentConv.model_id) { currentIndex = i; break }
+                                var models = page.chatModels()
+                                for (var i = 0; i < models.length; i++)
+                                    if (models[i].id === page.currentConv.model_id) { currentIndex = i; break }
                             }
                         }
                         delegate: ItemDelegate {

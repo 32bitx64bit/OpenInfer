@@ -98,7 +98,11 @@ opt-in. Inference processes bind loopback with per-process keys.
   (mirrors llama.cpp’s experimental libmtmd audio input; quality may vary).
 - Windows hardware detection is thinner than Linux.
 - No dedicated first-run onboarding wizard yet.
-- No software license selected yet.
+
+## License
+
+OpenInfer Studio is free software licensed under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 
 ## Releases
 

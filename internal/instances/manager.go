@@ -223,7 +223,13 @@ func (m *Manager) Preview(modelID string, s LoadSettings) (BuildResult, error) {
 		return BuildResult{}, err
 	}
 	help, _ := m.runtimes.HelpOutput(rt.ID)
-	br := BuildArgs(s, mdl.PrimaryPath, mdl.ProjectorPath, rt.Capabilities, help,
+	caps := rt.Capabilities
+	if help != "" {
+		// Prefer live --help so newly recognized flags (e.g. --spec-type) work
+		// even when runtime_capabilities was snapshotted on an older build.
+		caps = runtimes.ParseCapabilities(help)
+	}
+	br := BuildArgs(s, mdl.PrimaryPath, mdl.ProjectorPath, caps, help,
 		"127.0.0.1", 0, "<generated-per-process>")
 	br.Resolutions = append([]Resolution{{
 		Setting: "Runtime", Auto: s.RuntimeID, Resolved: rt.ID + " (" + rt.Backend + ")",
@@ -317,13 +323,17 @@ func (m *Manager) Start(modelID string, s LoadSettings) (*Instance, error) {
 		return nil, fmt.Errorf("runtime %s executable missing (%s); reinstall or pick another runtime", rt.ID, rt.ExecutablePath)
 	}
 	help, _ := m.runtimes.HelpOutput(rt.ID)
+	caps := rt.Capabilities
+	if help != "" {
+		caps = runtimes.ParseCapabilities(help)
+	}
 
 	port, err := allocatePort()
 	if err != nil {
 		return nil, err
 	}
 	apiKey := genAPIKey()
-	br := BuildArgs(s, mdl.PrimaryPath, mdl.ProjectorPath, rt.Capabilities, help, "127.0.0.1", port, apiKey)
+	br := BuildArgs(s, mdl.PrimaryPath, mdl.ProjectorPath, caps, help, "127.0.0.1", port, apiKey)
 
 	instID := uuid.NewString()
 	alias := s.Alias

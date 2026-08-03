@@ -71,6 +71,7 @@ func (s *Server) RegisterRoutes(d *Deps) {
 	s.Handle("GET /api/v1/models/{id}/logs", h.modelLogs)
 	s.Handle("POST /api/v1/models/{id}/preview", h.previewLoad)
 	s.Handle("POST /api/v1/models/{id}/estimate", h.estimateLoad)
+	s.Handle("GET /api/v1/models/{id}/draft-candidates", h.draftCandidates)
 	s.Handle("POST /api/v1/models/{id}/load", h.loadModel)
 	s.Handle("POST /api/v1/models/{id}/unload", h.unloadModel)
 	s.Handle("POST /api/v1/models/{id}/restart", h.restartModel)

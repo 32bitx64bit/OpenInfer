@@ -46,6 +46,9 @@ var knownFlags = map[string]string{
 	"--spec-draft-model":     "model-draft",
 	"--draft-max":            "draft-max",
 	"--spec-draft-n-max":     "draft-max",
+	"--draft-min":            "draft-min",
+	"--spec-draft-n-min":     "draft-min",
+	"--spec-type":            "spec-type",
 	"--sleep-idle-seconds":   "sleep-idle-seconds",
 	"--embedding":            "embedding",
 	"--reranking":            "reranking",
@@ -166,8 +169,9 @@ func FlagTakesValue(help, flag string) bool {
 }
 
 // SupportsFlag reports whether the raw CLI flag is known and supported by a
-// runtime with the given capability list. Unknown flags are only allowed when
-// they came from the runtime's own --help (handled by caller via rawHelp).
+// runtime with the given capability list. Capability rows are snapshotted at
+// install time, so newly recognized flags may be missing from old snapshots —
+// when that happens we fall back to the runtime's captured --help text.
 func SupportsFlag(caps []string, help, flag string) bool {
 	if flagRemoved(help, flag) {
 		return false
@@ -178,6 +182,9 @@ func SupportsFlag(caps []string, help, flag string) bool {
 			if c == cap {
 				return true
 			}
+		}
+		if help != "" && strings.Contains(help, flag) {
+			return true
 		}
 		return false
 	}

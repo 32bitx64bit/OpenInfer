@@ -266,3 +266,16 @@ func TestEstimateSharedKVLayers(t *testing.T) {
 		t.Fatalf("shared_kv=10 of 20 should halve KV: shared=%d all=%d", shared.KVCacheBytes, all.KVCacheBytes)
 	}
 }
+
+func TestEstimateDraftWeights(t *testing.T) {
+	base := baseIn()
+	without := EstimateMemory(base)
+	base.DraftWeights = 500 << 20
+	with := EstimateMemory(base)
+	if with.DraftWeightsBytes != 500<<20 {
+		t.Fatalf("draft_weights_bytes = %d", with.DraftWeightsBytes)
+	}
+	if with.TotalBytes-without.TotalBytes < 500<<20 {
+		t.Errorf("total should grow by at least draft size: without=%d with=%d", without.TotalBytes, with.TotalBytes)
+	}
+}

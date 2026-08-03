@@ -23,6 +23,12 @@ func TestDetectModalities(t *testing.T) {
 		{"bartowski/Llama-3.2-3B-Instruct-GGUF", "",
 			[]string{"gguf", "conversational"}, nil},
 		{"someone/gemma-4-E2B-it-GGUF", "", []string{"gguf"}, []string{"audio", "vision"}},
+		// Speculative draft / speculator repos must not inherit VL/audio labels.
+		{"williamliao/gemma-4-31B-it-EAGLE3-Speculator-GGUF", "image-text-to-text",
+			[]string{"gguf", "image-text-to-text"}, nil},
+		{"z-lab/Qwen3-4B-DFlash-GGUF", "", []string{"gguf", "speculative-decoding"}, nil},
+		{"org/Qwen2.5-VL-3B-Instruct-eagle3-GGUF", "", []string{"gguf"}, nil},
+		{"someone/mtp-Qwen3.6-27B-GGUF", "", []string{"gguf"}, nil},
 	}
 	for _, tc := range cases {
 		got := DetectModalities(tc.id, tc.pipe, tc.tags)

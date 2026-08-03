@@ -234,45 +234,60 @@ func (l *Library) Scan() (int, error) {
 		if len(tensorIssues) > 0 {
 			l.log.Warn("gguf tensor validation failed", "path", primary, "issues", tensorIssues)
 		}
+		// Path/name heuristics catch draft sidecars (mtp-, eagle3-, …) and
+		// community draft names that still use a normal architecture string.
+		md.ApplySpeculativeFlags(primary)
 		var total int64
 		for _, f := range files {
 			total += f.size
 		}
 		var proj string
 		var projHasVision, projHasAudio bool
-		if p, ok := projectors[filepath.Dir(primary)]; ok {
-			proj = p.path
-			total += p.size
-			if _, pmd, perr := gguf.ValidateFile(proj); perr == nil {
-				projHasVision = pmd.HasVision
-				projHasAudio = pmd.HasAudio
-				// CLIP projectors often only set architecture=clip; treat as vision
-				// unless audio encoder keys are present.
-				if pmd.Projector && !projHasVision && !projHasAudio {
-					projHasVision = true
+		// Never pair an mmproj with a speculative draft model — drafts are not
+		// multimodal chat models even when co-located with a VL target's projector.
+		if !md.SpeculativeDraft {
+			if p, ok := projectors[filepath.Dir(primary)]; ok {
+				proj = p.path
+				total += p.size
+				if _, pmd, perr := gguf.ValidateFile(proj); perr == nil {
+					projHasVision = pmd.HasVision
+					projHasAudio = pmd.HasAudio
+					// CLIP projectors often only set architecture=clip; treat as vision
+					// unless audio encoder keys are present.
+					if pmd.Projector && !projHasVision && !projHasAudio {
+						projHasVision = true
+					}
 				}
-			}
-			// Filename heuristics when mmproj metadata is sparse.
-			plower := strings.ToLower(filepath.Base(proj) + " " + filepath.Base(primary))
-			for _, h := range []string{"ultravox", "voxtral", "asr", "whisper", "audio", "omni"} {
-				if strings.Contains(plower, h) {
-					projHasAudio = true
+				// Filename heuristics when mmproj metadata is sparse.
+				plower := strings.ToLower(filepath.Base(proj) + " " + filepath.Base(primary))
+				for _, h := range []string{"ultravox", "voxtral", "asr", "whisper", "audio", "omni"} {
+					if strings.Contains(plower, h) {
+						projHasAudio = true
+					}
 				}
-			}
-			for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm"} {
-				if strings.Contains(plower, h) {
-					projHasVision = true
+				for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm"} {
+					if strings.Contains(plower, h) {
+						projHasVision = true
+					}
 				}
 			}
 		}
 		hasVision := md.HasVision || projHasVision
 		hasAudio := md.HasAudio || projHasAudio
 		multimodal := md.Multimodal || hasVision || hasAudio || proj != ""
+		if md.SpeculativeDraft {
+			hasVision, hasAudio, multimodal = false, false, false
+			proj = ""
+		}
 		metaJSON, _ := json.Marshal(map[string]any{
 			"name": md.Name, "tokenizer": md.Tokenizer,
 			"multimodal": multimodal, "has_vision": hasVision, "has_audio": hasAudio,
-			"version":     md.Version,
-			"block_count": md.BlockCount, "head_count": md.HeadCount,
+			"speculative_draft":    md.SpeculativeDraft,
+			"has_mtp":              md.HasMTP,
+			"nextn_predict_layers": md.NextnPredictLayers,
+			"spec_type":            md.SpecType,
+			"version":              md.Version,
+			"block_count":          md.BlockCount, "head_count": md.HeadCount,
 			"head_count_kv": md.HeadCountKV, "head_count_kv_layers": md.HeadCountKVLayers,
 			"head_dim": md.HeadDim, "value_dim": md.ValueDim,
 			"head_dim_swa": md.HeadDimSWA, "value_dim_swa": md.ValueDimSWA,

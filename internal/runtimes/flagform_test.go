@@ -66,3 +66,18 @@ func TestRemovedFlagsExcluded(t *testing.T) {
 		t.Error("--mlock is deprecated but functional and must stay supported")
 	}
 }
+
+func TestSupportsFlagFallsBackToHelpForStaleCaps(t *testing.T) {
+	// Caps snapshotted before --spec-type was added to knownFlags.
+	stale := []string{"model-draft", "draft-max", "host", "port"}
+	help := `
+--spec-draft-model, -md, --model-draft FNAME
+--spec-type none,draft-simple,draft-eagle3,draft-mtp,draft-dflash,draft-dspark
+`
+	if !SupportsFlag(stale, help, "--spec-type") {
+		t.Error("stale caps must still allow --spec-type when help advertises it")
+	}
+	if SupportsFlag(stale, "", "--spec-type") {
+		t.Error("without help text, missing caps must not invent support")
+	}
+}
