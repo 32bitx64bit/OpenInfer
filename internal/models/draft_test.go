@@ -79,6 +79,27 @@ func TestDraftCompatibleSpecializedArch(t *testing.T) {
 	}
 }
 
+func TestDraftCompatibleGemma4Assistant(t *testing.T) {
+	target := Model{
+		ID: "e2b", Architecture: "gemma4", SizeBytes: 3 << 30,
+		Metadata: metaTok("gemma4"),
+	}
+	draft := Model{
+		ID: "asst", Architecture: "gemma4-assistant", SizeBytes: 98 << 20,
+		PrimaryPath: "/m/gemma-4-E2B-it-assistant.Q8_0.gguf",
+		Metadata:    json.RawMessage(`{"tokenizer":"gemma4","speculative_draft":true,"spec_type":"draft-mtp","has_mtp":true}`),
+	}
+	ok, reason := DraftCompatible(target, draft)
+	if !ok {
+		t.Fatalf("gemma4-assistant must pair with gemma4: %s", reason)
+	}
+	lib := []Model{target, draft}
+	filtered := FilterDraftCandidates(target, lib, true)
+	if len(filtered) != 1 || filtered[0].ID != "asst" {
+		t.Fatalf("filtered picker must include gemma4-assistant, got %+v", filtered)
+	}
+}
+
 func TestFilterDraftCandidates(t *testing.T) {
 	target := Model{ID: "t", Architecture: "llama", Parameters: 8e9, Metadata: metaTok("llama")}
 	lib := []Model{

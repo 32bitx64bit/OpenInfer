@@ -32,6 +32,11 @@ Item {
         if (!m) return false
         var meta = m.metadata || {}
         if (meta.speculative_draft) return true
+        var arch = String(m.architecture || "").toLowerCase()
+        if (arch === "gemma4-assistant" || arch === "gemma4_assistant"
+                || arch === "eagle3" || arch === "dflash" || arch === "dflash-draft"
+                || arch === "dspark")
+            return true
         // Path fallback if library metadata hasn't been rescanned yet.
         var path = String(m.primary_path || m.alias || "").toLowerCase()
         var base = path.split("/").pop() || path

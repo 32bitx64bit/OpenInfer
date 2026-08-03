@@ -54,7 +54,7 @@ Events: `download.progress` (bytes, speed, ETA), `download.state_changed`.
 |---|---|
 | POST `/models/{id}/preview` | resolved command, resolutions, warnings — nothing started |
 | POST `/models/{id}/estimate` | projected memory: weights, draft, mmproj, KV, compute, media, overhead; independent `gpu_bytes`/`cpu_bytes` vs `gpu_budget_bytes`/`cpu_budget_bytes` (`fits_gpu`/`fits_cpu`/`fits`); `offload_fraction` for custom layer offload; `budget_kind` is `VRAM+RAM`, `VRAM`, `RAM`, or `unified RAM` |
-| GET `/models/{id}/draft-candidates[?filter=0\|1]` | draft picker list; filter on (default / `load.filter_incompatible_drafts`) returns only speculative sidecars (mtp-/eagle3-/dflash-/dspark-); filter off returns all other library models |
+| GET `/models/{id}/draft-candidates[?filter=0\|1]` | draft picker list; filter on (default / `load.filter_incompatible_drafts`) returns only speculative sidecars (mtp-/gemma4-assistant/eagle3-/dflash-/dspark-); filter off returns all other library models |
 | POST `/models/{id}/load` | start (LoadSettings JSON; all fields optional). Speculative: `draft_model` (abs path), `draft_max`, `draft_min`, `spec_type` (`draft-simple`/`draft-eagle3`/`draft-dflash`/`draft-dspark`/`draft-mtp`/ngram-*; auto from sidecar prefix when draft set; fused MTP via `spec_type=draft-mtp` alone) |
 | POST `/models/{id}/unload[?force=1]` | graceful / forced stop |
 | POST `/models/{id}/restart` | reload with settings |

@@ -36,6 +36,10 @@ var speculativeArchs = map[string]SpecType{
 	"dflash":       SpecDFlash,
 	"dflash-draft": SpecDFlash,
 	"dspark":       SpecDSpark,
+	// Official Gemma 4 MTP assistants (Google / AtomicChat). Filenames are often
+	// *-assistant*.gguf without an mtp- prefix; architecture is the signal.
+	"gemma4-assistant": SpecMTP,
+	"gemma4_assistant": SpecMTP,
 }
 
 // Extra name tokens (community GGUFs that don't use the official prefix).

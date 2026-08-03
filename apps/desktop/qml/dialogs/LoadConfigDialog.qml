@@ -624,8 +624,8 @@ Dialog {
                     Layout.fillWidth: true
                     label: "Speculative draft"
                     hint: root.draftFiltered
-                          ? "Only detected speculative drafts (mtp- / eagle3- / dflash- / dspark-). Turn off Settings → Filter draft model picker to choose any GGUF."
-                          : "All library models (filter off). Prefer official sidecars when available."
+                          ? "Only detected speculative drafts (mtp- / gemma4-assistant / eagle3- / dflash- / dspark-). Turn off Settings → Filter draft model picker to choose any GGUF."
+                          : "All library models (filter off). Prefer official sidecars / gemma4-assistant when available."
                     argName: "--model-draft"
                     ComboBox {
                         id: draftCombo
@@ -645,6 +645,7 @@ Dialog {
                             // Prefer library metadata / sidecar-inferred type (mtp-, eagle3-, …).
                             var st = item.spec_type || (item.metadata && item.metadata.spec_type) || ""
                             if (!st && item.metadata && item.metadata.has_mtp) st = "draft-mtp"
+                            if (!st && (item.architecture === "gemma4-assistant" || item.architecture === "gemma4_assistant")) st = "draft-mtp"
                             if (!st && item.architecture === "eagle3") st = "draft-eagle3"
                             if (!st && (item.architecture === "dflash" || item.architecture === "dflash-draft")) st = "draft-dflash"
                             if (!st && item.architecture === "dspark") st = "draft-dspark"

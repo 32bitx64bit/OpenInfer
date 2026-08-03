@@ -118,9 +118,10 @@ func DraftCompatible(target, draft Model) (ok bool, reason string) {
 // FilterDraftCandidates returns library models usable as drafts for target.
 //
 // When filter is true (default / load.filter_incompatible_drafts): only
-// detected speculative-decoding sidecars (mtp-, eagle3-, dflash-, dspark-,
-// dedicated draft arches, …) are listed. When filter is false, every other
-// library model is returned so draft-simple companions can be picked manually.
+// detected speculative-decoding sidecars (mtp-, gemma4-assistant, eagle3-,
+// dflash-, dspark-, dedicated draft arches, …) are listed. When filter is
+// false, every other library model is returned so draft-simple companions
+// can be picked manually.
 func FilterDraftCandidates(target Model, library []Model, filter bool) []DraftCandidate {
 	out := make([]DraftCandidate, 0, len(library))
 	for _, m := range library {

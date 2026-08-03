@@ -23,9 +23,33 @@ func TestDetectSpeculativeDraftArch(t *testing.T) {
 	if !ok || spec != SpecEagle3 {
 		t.Fatalf("eagle3: ok=%v spec=%q", ok, spec)
 	}
+	ok, spec = DetectSpeculativeDraft("gemma4-assistant", "Gemma 4 E2B It Assistant",
+		"/m/gemma-4-E2B-it-assistant.Q8_0.gguf", nil)
+	if !ok || spec != SpecMTP {
+		t.Fatalf("gemma4-assistant: ok=%v spec=%q", ok, spec)
+	}
 	ok, _ = DetectSpeculativeDraft("llama", "", "", nil)
 	if ok {
 		t.Fatal("llama must not be draft")
+	}
+}
+
+func TestGemma4AssistantApplyFlags(t *testing.T) {
+	// Official E2B MTP file: no mtp- prefix, arch gemma4-assistant + NextN.
+	md := &Metadata{
+		Architecture: "gemma4-assistant",
+		Name:         "Gemma 4 E2B It Assistant",
+		Raw: map[string]any{
+			"gemma4-assistant.nextn_predict_layers": uint32(4),
+		},
+	}
+	md.extract()
+	md.ApplySpeculativeFlags("/models/gemma-4-E2B-it-assistant.Q8_0.gguf")
+	if !md.SpeculativeDraft || md.SpecType != SpecMTP {
+		t.Fatalf("expected mtp draft: draft=%v type=%q", md.SpeculativeDraft, md.SpecType)
+	}
+	if !md.HasMTP || md.NextnPredictLayers != 4 {
+		t.Fatalf("expected HasMTP/nextn: %+v", md)
 	}
 }
 
