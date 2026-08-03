@@ -250,24 +250,32 @@ func (l *Library) Scan() (int, error) {
 				proj = p.path
 				total += p.size
 				if _, pmd, perr := gguf.ValidateFile(proj); perr == nil {
+					// Trust parsed encoder flags. Do not let filename heuristics
+					// override a vision-only mmproj that sets has_audio=false.
 					projHasVision = pmd.HasVision
 					projHasAudio = pmd.HasAudio
-					// CLIP projectors often only set architecture=clip; treat as vision
-					// unless audio encoder keys are present.
 					if pmd.Projector && !projHasVision && !projHasAudio {
 						projHasVision = true
 					}
-				}
-				// Filename heuristics when mmproj metadata is sparse.
-				plower := strings.ToLower(filepath.Base(proj) + " " + filepath.Base(primary))
-				for _, h := range []string{"ultravox", "voxtral", "asr", "whisper", "audio", "omni"} {
-					if strings.Contains(plower, h) {
-						projHasAudio = true
+				} else {
+					// Parse failed — fall back to conservative filename hints.
+					plower := strings.ToLower(filepath.Base(proj) + " " + filepath.Base(primary))
+					for _, h := range []string{
+						"ultravox", "voxtral", "whisper", "qwen2-audio", "qwen3-asr",
+						"-asr-", "_asr_", "seallm-audio", "-audio-", "_audio_",
+						"-omni-", "_omni_", "omni-",
+					} {
+						if strings.Contains(plower, h) {
+							projHasAudio = true
+						}
 					}
-				}
-				for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm"} {
-					if strings.Contains(plower, h) {
-						projHasVision = true
+					for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm"} {
+						if strings.Contains(plower, h) {
+							projHasVision = true
+						}
+					}
+					if !projHasVision && !projHasAudio {
+						projHasVision = true // paired mmproj ⇒ assume vision
 					}
 				}
 			}

@@ -167,11 +167,15 @@ func (c *Client) Search(ctx context.Context, query, sort string, limit int) ([]S
 		if author == "" {
 			author, _, _ = strings.Cut(m.ID, "/")
 		}
+		files := make([]string, 0, len(m.Siblings))
+		for _, s := range m.Siblings {
+			files = append(files, s.RFileName)
+		}
 		out = append(out, SearchResult{
 			ID: m.ID, Author: author, Downloads: m.Downloads, Likes: m.Likes,
 			Trending: m.TrendingScore, UpdatedAt: m.LastModified, Tags: m.Tags,
 			Private: m.Private, Gated: m.Gated, PipelineTag: m.PipelineTag,
-			Modalities: DetectModalities(m.ID, m.PipelineTag, m.Tags),
+			Modalities: DetectModalities(m.ID, m.PipelineTag, m.Tags, files),
 		})
 	}
 	return out, nil

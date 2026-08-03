@@ -472,37 +472,35 @@ func (md *Metadata) extract() {
 		}
 	}
 	// Multimodal indicators (vision / audio encoders live in mmproj or fused GGUF).
-	for k := range md.Raw {
-		lk := strings.ToLower(k)
-		switch k {
-		case "clip.vision.patch_size", "clip.has_vision_encoder",
-			"gemma3.mm.scale_emb":
-			md.HasVision = true
-			md.Multimodal = true
-		case "clip.has_audio_encoder", "audio.block_count":
-			md.HasAudio = true
-			md.Multimodal = true
-		default:
-			if strings.HasPrefix(lk, "clip.vision.") || strings.HasPrefix(lk, "gemma3.mm.") {
-				md.HasVision = true
-				md.Multimodal = true
-			}
-			if strings.HasPrefix(lk, "clip.audio.") || strings.HasPrefix(lk, "audio.") {
-				md.HasAudio = true
-				md.Multimodal = true
-			}
-		}
-	}
-	if _, ok := md.Raw["clip.has_vision_encoder"]; ok {
+	// Boolean encoder flags must be truthy — vision-only mmproj files often
+	// include clip.has_audio_encoder=false (and the reverse for audio-only).
+	if rawBoolTrue(md.Raw, "clip.has_vision_encoder") {
 		md.HasVision = true
 		md.Multimodal = true
+	}
+	if rawBoolTrue(md.Raw, "clip.has_audio_encoder") {
+		md.HasAudio = true
+		md.Multimodal = true
+	}
+	for k := range md.Raw {
+		lk := strings.ToLower(k)
+		switch {
+		case k == "clip.has_vision_encoder" || k == "clip.has_audio_encoder":
+			// Handled above via value, not presence.
+		case k == "clip.vision.patch_size" || k == "gemma3.mm.scale_emb" ||
+			strings.HasPrefix(lk, "clip.vision.") || strings.HasPrefix(lk, "gemma3.mm."):
+			md.HasVision = true
+			md.Multimodal = true
+		case k == "audio.block_count" || strings.HasPrefix(lk, "clip.audio.") ||
+			strings.HasPrefix(lk, "audio."):
+			md.HasAudio = true
+			md.Multimodal = true
+		}
+	}
+	if rawBoolTrue(md.Raw, "clip.has_vision_encoder") || md.HasVision {
 		if md.Architecture == "clip" || md.Name == "" {
 			md.Projector = md.Architecture == "clip"
 		}
-	}
-	if _, ok := md.Raw["clip.has_audio_encoder"]; ok {
-		md.HasAudio = true
-		md.Multimodal = true
 	}
 	if md.Architecture == "clip" {
 		md.Projector = true
@@ -510,6 +508,33 @@ func (md *Metadata) extract() {
 
 	// Speculative draft / MTP detection (path filled in by callers that have one).
 	md.ApplySpeculativeFlags("")
+}
+
+// rawBoolTrue reports whether key exists in raw and is a true boolean (or a
+// non-zero numeric stand-in). Missing keys and explicit false are false.
+func rawBoolTrue(raw map[string]any, key string) bool {
+	v, ok := raw[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case uint8:
+		return b != 0
+	case uint32:
+		return b != 0
+	case uint64:
+		return b != 0
+	case int:
+		return b != 0
+	case int32:
+		return b != 0
+	case int64:
+		return b != 0
+	default:
+		return false
+	}
 }
 
 func toUint32(v any) (uint32, bool) {

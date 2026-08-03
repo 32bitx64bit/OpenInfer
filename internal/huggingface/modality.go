@@ -1,15 +1,20 @@
 package huggingface
 
 import (
+	"path/filepath"
 	"strings"
 )
 
 // DetectModalities infers audio / vision capabilities from Hugging Face
-// pipeline tags, repo tags, and repository id heuristics. Returns a stable
-// ordered slice: "audio" and/or "vision". Empty means unknown (text-only or
-// insufficient signals). Speculative draft / speculator repos are never
-// labeled multimodal — they are companions to a target model, not chat models.
-func DetectModalities(repoID, pipelineTag string, tags []string) []string {
+// pipeline tags, repo tags, repository id heuristics, and optional file
+// paths (siblings / tree). Returns a stable ordered slice: "audio" and/or
+// "vision". Empty means unknown (text-only or insufficient signals).
+// Speculative draft / speculator repos are never labeled multimodal — they
+// are companions to a target model, not chat models.
+//
+// Name heuristics alone never claim audio for broad families (e.g. gemma-4):
+// those need an mmproj (or an audio pipeline/tag) before audio is advertised.
+func DetectModalities(repoID, pipelineTag string, tags []string, filePaths []string) []string {
 	lowerID := strings.ToLower(repoID)
 	if looksLikeSpeculativeDraftRepo(lowerID, tags) {
 		return nil
@@ -21,6 +26,21 @@ func DetectModalities(repoID, pipelineTag string, tags []string) []string {
 	}
 
 	audio, vision := false, false
+	hasMmproj := false
+	audioFileHint, visionFileHint := false, false
+	for _, p := range filePaths {
+		base := strings.ToLower(filepath.Base(p))
+		if strings.Contains(base, "mmproj") || strings.Contains(base, "mm-proj") ||
+			strings.Contains(base, "projector") {
+			hasMmproj = true
+		}
+		if fileSuggestsAudio(base) {
+			audioFileHint = true
+		}
+		if fileSuggestsVision(base) {
+			visionFileHint = true
+		}
+	}
 
 	switch lowerPipe {
 	case "audio-text-to-text", "automatic-speech-recognition":
@@ -49,31 +69,46 @@ func DetectModalities(repoID, pipelineTag string, tags []string) []string {
 		audio, vision = true, true
 	}
 
-	// Name heuristics — many ggml-org audio GGUFs lack pipeline tags.
-	audioHints := []string{
+	// Specific audio model families — many ggml-org audio GGUFs lack pipeline tags.
+	for _, h := range []string{
 		"ultravox", "voxtral", "qwen3-asr", "qwen2-audio", "whisper",
 		"seallm-audio", "glm-asr", "lfm2-audio", "lfm2.5-audio",
-	}
-	visionHints := []string{
-		"llava", "vision", "-vl-", "-vl_", "pixtral", "internvl",
-		"moondream", "smolvlm", "minicpm-v", "qwen2-vl", "qwen2.5-vl",
-	}
-	mixedHints := []string{"omni", "gemma-4", "gemma4"}
-
-	for _, h := range audioHints {
+	} {
 		if strings.Contains(lowerID, h) {
 			audio = true
 		}
 	}
-	for _, h := range visionHints {
+	// Token-bounded omni (avoid matching unrelated substrings).
+	if containsToken(lowerID, "omni") {
+		audio, vision = true, true
+	}
+
+	for _, h := range []string{
+		"llava", "vision", "-vl-", "-vl_", "pixtral", "internvl",
+		"moondream", "smolvlm", "minicpm-v", "qwen2-vl", "qwen2.5-vl",
+	} {
 		if strings.Contains(lowerID, h) {
 			vision = true
 		}
 	}
-	for _, h := range mixedHints {
-		if strings.Contains(lowerID, h) {
+
+	// File evidence: mmproj implies at least vision unless audio-only names.
+	if hasMmproj {
+		if audioFileHint {
+			audio = true
+		}
+		if visionFileHint || !audio {
+			vision = true
+		}
+		// Official Gemma 4 mmproj ships both encoders; only claim when a
+		// projector is actually present (text-only gemma-4 quants stay plain).
+		if strings.Contains(lowerID, "gemma-4") || strings.Contains(lowerID, "gemma4") {
 			audio, vision = true, true
 		}
+	}
+
+	if audioFileHint {
+		audio = true
 	}
 
 	// Generic "multimodal" tag alone is not enough to claim audio.
@@ -89,6 +124,51 @@ func DetectModalities(repoID, pipelineTag string, tags []string) []string {
 		out = append(out, "vision")
 	}
 	return out
+}
+
+func fileSuggestsAudio(base string) bool {
+	for _, h := range []string{
+		"ultravox", "voxtral", "whisper", "qwen2-audio", "qwen3-asr",
+		"seallm-audio", "-asr-", "_asr_", "-audio-", "_audio_",
+		"-omni-", "_omni_", "omni-",
+	} {
+		if strings.Contains(base, h) {
+			return true
+		}
+	}
+	return containsToken(base, "asr") || containsToken(base, "audio") || containsToken(base, "omni")
+}
+
+func fileSuggestsVision(base string) bool {
+	for _, h := range []string{"llava", "vision", "vl-", "pixtral", "internvl", "smolvlm", "minicpm"} {
+		if strings.Contains(base, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsToken reports whether needle appears as a path/id token bounded by
+// non-alphanumeric characters (or string edges).
+func containsToken(s, needle string) bool {
+	if needle == "" || !strings.Contains(s, needle) {
+		return false
+	}
+	for i := 0; i+len(needle) <= len(s); i++ {
+		if s[i:i+len(needle)] != needle {
+			continue
+		}
+		leftOK := i == 0 || !isASCIIAlnum(s[i-1])
+		rightOK := i+len(needle) == len(s) || !isASCIIAlnum(s[i+len(needle)])
+		if leftOK && rightOK {
+			return true
+		}
+	}
+	return false
+}
+
+func isASCIIAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z')
 }
 
 func looksLikeSpeculativeDraftRepo(lowerID string, tags []string) bool {

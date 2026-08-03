@@ -136,7 +136,11 @@ func (h *handlers) hfRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	groups, projectors := huggingface.GroupFiles(info.Files)
-	modalities := huggingface.DetectModalities(info.ID, info.PipelineTag, info.Tags)
+	filePaths := make([]string, 0, len(info.Files))
+	for _, f := range info.Files {
+		filePaths = append(filePaths, f.Path)
+	}
+	modalities := huggingface.DetectModalities(info.ID, info.PipelineTag, info.Tags, filePaths)
 	writeJSON(w, 200, map[string]any{
 		"repo": info, "groups": groups, "projectors": projectors,
 		"modalities":    modalities,

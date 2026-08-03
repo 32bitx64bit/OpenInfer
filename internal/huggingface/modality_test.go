@@ -9,29 +9,41 @@ func TestDetectModalities(t *testing.T) {
 	cases := []struct {
 		id, pipe string
 		tags     []string
+		files    []string
 		want     []string
 	}{
 		{"ggml-org/ultravox-v0_5-llama-3_2-1b-GGUF", "audio-text-to-text",
-			[]string{"gguf", "audio-text-to-text"}, []string{"audio"}},
+			[]string{"gguf", "audio-text-to-text"}, nil, []string{"audio"}},
 		{"ggml-org/Voxtral-Mini-3B-2507-GGUF", "",
-			[]string{"gguf", "conversational"}, []string{"audio"}},
-		{"ggml-org/Qwen3-ASR-0.6B-GGUF", "", nil, []string{"audio"}},
+			[]string{"gguf", "conversational"}, nil, []string{"audio"}},
+		{"ggml-org/Qwen3-ASR-0.6B-GGUF", "", nil, nil, []string{"audio"}},
 		{"ggml-org/llava-v1.6-mistral-7b-GGUF", "image-text-to-text",
-			[]string{"image-text-to-text"}, []string{"vision"}},
+			[]string{"image-text-to-text"}, nil, []string{"vision"}},
 		{"ggml-org/Qwen2.5-Omni-3B-GGUF", "any-to-any",
-			[]string{"multimodal", "any-to-any"}, []string{"audio", "vision"}},
+			[]string{"multimodal", "any-to-any"}, nil, []string{"audio", "vision"}},
 		{"bartowski/Llama-3.2-3B-Instruct-GGUF", "",
-			[]string{"gguf", "conversational"}, nil},
-		{"someone/gemma-4-E2B-it-GGUF", "", []string{"gguf"}, []string{"audio", "vision"}},
+			[]string{"gguf", "conversational"}, nil, nil},
+		// Text-only Gemma 4 quants must NOT inherit audio/vision from the name.
+		{"someone/gemma-4-E2B-it-GGUF", "", []string{"gguf"}, nil, nil},
+		{"SC117/gemma-4-12B-it-heretic-QAT-GGUF", "", []string{"gguf"}, nil, nil},
+		// Official-style Gemma 4 with mmproj: both encoders.
+		{"google/gemma-4-E2B-it-qat-q4_0-gguf", "", []string{"gguf"},
+			[]string{"gemma-4-E2B_q4_0-it.gguf", "gemma-4-E2B-it-mmproj.gguf"},
+			[]string{"audio", "vision"}},
+		// Vision-only projector repo: no audio from name alone.
+		{"openbmb/MiniCPM-V-4.6-gguf", "", []string{"gguf"},
+			[]string{"MiniCPM-V-4_6-Q6_K.gguf", "mmproj-model-f16.gguf"},
+			[]string{"vision"}},
 		// Speculative draft / speculator repos must not inherit VL/audio labels.
 		{"williamliao/gemma-4-31B-it-EAGLE3-Speculator-GGUF", "image-text-to-text",
-			[]string{"gguf", "image-text-to-text"}, nil},
-		{"z-lab/Qwen3-4B-DFlash-GGUF", "", []string{"gguf", "speculative-decoding"}, nil},
-		{"org/Qwen2.5-VL-3B-Instruct-eagle3-GGUF", "", []string{"gguf"}, nil},
-		{"someone/mtp-Qwen3.6-27B-GGUF", "", []string{"gguf"}, nil},
+			[]string{"gguf", "image-text-to-text"},
+			[]string{"eagle3.gguf"}, nil},
+		{"z-lab/Qwen3-4B-DFlash-GGUF", "", []string{"gguf", "speculative-decoding"}, nil, nil},
+		{"org/Qwen2.5-VL-3B-Instruct-eagle3-GGUF", "", []string{"gguf"}, nil, nil},
+		{"someone/mtp-Qwen3.6-27B-GGUF", "", []string{"gguf"}, nil, nil},
 	}
 	for _, tc := range cases {
-		got := DetectModalities(tc.id, tc.pipe, tc.tags)
+		got := DetectModalities(tc.id, tc.pipe, tc.tags, tc.files)
 		if len(got) == 0 && len(tc.want) == 0 {
 			continue
 		}
