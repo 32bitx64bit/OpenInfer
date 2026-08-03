@@ -14,24 +14,35 @@ import "strings"
 //   compute   = activation/graph scratch
 //   overhead  = fixed runtime / driver reserve
 //   media     = multimodal encoder activation headroom (when mmproj present)
+//
+// Placement:
+//   full GPU offload → weights/KV/compute on GPU; optional mmproj on CPU
+//   partial offload  → layer fraction of weights+KV on GPU, remainder on RAM
+//   CPU only         → everything on system RAM
+// GPU VRAM and system RAM are budgeted independently; Fits requires both.
 
 // Estimate breaks down projected memory use for one configuration.
 type Estimate struct {
-	WeightsBytes      int64  `json:"weights_bytes"`
-	DraftWeightsBytes int64  `json:"draft_weights_bytes"`
-	ProjectorBytes    int64  `json:"projector_bytes"`
-	KVCacheBytes      int64  `json:"kv_cache_bytes"`
-	RecurrentBytes    int64  `json:"recurrent_bytes"` // hybrid SSM / linear-attn state
-	ComputeBytes      int64  `json:"compute_bytes"`
-	MediaBytes        int64  `json:"media_bytes"` // multimodal encoder activations
-	OverheadBytes     int64  `json:"overhead_bytes"`
-	TotalBytes        int64  `json:"total_bytes"`
-	GPUBytes          int64  `json:"gpu_bytes"`
-	CPUBytes          int64  `json:"cpu_bytes"`
-	BudgetBytes       uint64 `json:"budget_bytes"`
-	BudgetKind        string `json:"budget_kind"` // "VRAM", "unified RAM", "RAM"
-	Fits              bool   `json:"fits"`
-	Note              string `json:"note"`
+	WeightsBytes      int64   `json:"weights_bytes"`
+	DraftWeightsBytes int64   `json:"draft_weights_bytes"`
+	ProjectorBytes    int64   `json:"projector_bytes"`
+	KVCacheBytes      int64   `json:"kv_cache_bytes"`
+	RecurrentBytes    int64   `json:"recurrent_bytes"` // hybrid SSM / linear-attn state
+	ComputeBytes      int64   `json:"compute_bytes"`
+	MediaBytes        int64   `json:"media_bytes"` // multimodal encoder activations
+	OverheadBytes     int64   `json:"overhead_bytes"`
+	TotalBytes        int64   `json:"total_bytes"`
+	GPUBytes          int64   `json:"gpu_bytes"`
+	CPUBytes          int64   `json:"cpu_bytes"`
+	GPUBudgetBytes    uint64  `json:"gpu_budget_bytes"` // discrete VRAM (0 on unified / CPU-only)
+	CPUBudgetBytes    uint64  `json:"cpu_budget_bytes"` // system RAM budget
+	BudgetBytes       uint64  `json:"budget_bytes"`     // primary budget for back-compat UI
+	BudgetKind        string  `json:"budget_kind"`      // "VRAM", "unified RAM", "RAM", "VRAM+RAM"
+	FitsGPU           bool    `json:"fits_gpu"`
+	FitsCPU           bool    `json:"fits_cpu"`
+	Fits              bool    `json:"fits"`
+	OffloadFraction   float64 `json:"offload_fraction"` // 0..1 of layers on GPU
+	Note              string  `json:"note"`
 }
 
 // EstimateInput collects everything EstimateMemory needs.
@@ -174,11 +185,15 @@ func EstimateMemory(in EstimateInput) Estimate {
 	est.TotalBytes = est.WeightsBytes + est.DraftWeightsBytes + est.ProjectorBytes +
 		est.KVCacheBytes + est.RecurrentBytes + est.ComputeBytes + est.MediaBytes + est.OverheadBytes
 
-	switch {
-	case in.GPUOffload && in.VRAM > 0:
-		est.BudgetBytes = in.VRAM
-		est.BudgetKind = "VRAM"
-	case in.GPUOffload && in.VRAM == 0:
+	// Independent budgets: discrete GPU VRAM vs system RAM.
+	unified := in.GPUOffload && in.VRAM == 0
+	est.CPUBudgetBytes = in.RAM
+	if in.GPUOffload && !unified {
+		est.GPUBudgetBytes = in.VRAM
+		est.BudgetKind = "VRAM+RAM"
+		est.BudgetBytes = in.VRAM // primary bar stays VRAM for back-compat
+	} else if unified {
+		est.GPUBudgetBytes = 0
 		est.BudgetBytes = in.RAM
 		est.BudgetKind = "unified RAM"
 		if est.Note == "" {
@@ -186,23 +201,48 @@ func EstimateMemory(in EstimateInput) Estimate {
 		} else if !strings.Contains(est.Note, "GPU shares") {
 			est.Note += "; GPU shares system memory"
 		}
-	default:
+	} else {
+		est.GPUBudgetBytes = 0
 		est.BudgetBytes = in.RAM
 		est.BudgetKind = "RAM"
 	}
 
-	// Where does the projector / media live?
+	place(in, &est, projector, unified)
+	return est
+}
+
+// place assigns component bytes to GPU vs system RAM and evaluates fits.
+func place(in EstimateInput, est *Estimate, projector int64, unified bool) {
 	projOnGPU := in.GPUOffload && projector > 0 && !in.NoMmprojOffload
 	mediaOnGPU := projOnGPU
 
-	// Partial offload: split weights + KV by layer share. Draft weights follow
-	// the same GPU/CPU split as the target (llama.cpp loads both in-process).
-	if in.GPUOffload && in.Layers > 0 && in.OffloadedLayers > 0 && in.OffloadedLayers < in.Layers {
-		frac := float64(in.OffloadedLayers) / float64(in.Layers)
-		gpuW := int64(frac * float64(est.WeightsBytes+est.DraftWeightsBytes))
-		gpuKV := int64(frac * float64(est.KVCacheBytes+est.RecurrentBytes))
+	frac := offloadFraction(in)
+	est.OffloadFraction = frac
+
+	weights := est.WeightsBytes + est.DraftWeightsBytes
+	kvAll := est.KVCacheBytes + est.RecurrentBytes
+
+	switch {
+	case !in.GPUOffload || frac <= 0:
+		est.GPUBytes = 0
+		est.CPUBytes = est.TotalBytes
+		est.OffloadFraction = 0
+
+	case frac >= 1:
+		est.GPUBytes = est.TotalBytes
+		est.CPUBytes = 0
+		if in.NoMmprojOffload && (est.ProjectorBytes > 0 || est.MediaBytes > 0) {
+			est.GPUBytes -= est.ProjectorBytes + est.MediaBytes
+			est.CPUBytes = est.ProjectorBytes + est.MediaBytes
+		}
+		est.OffloadFraction = 1
+
+	default:
+		// Partial offload: layer fraction of weights + KV on GPU.
+		gpuW := int64(frac * float64(weights))
+		gpuKV := int64(frac * float64(kvAll))
 		est.GPUBytes = gpuW + gpuKV + est.ComputeBytes + est.OverheadBytes
-		est.CPUBytes = (est.WeightsBytes + est.DraftWeightsBytes - gpuW) + (est.KVCacheBytes + est.RecurrentBytes - gpuKV)
+		est.CPUBytes = (weights - gpuW) + (kvAll - gpuKV)
 		if projOnGPU {
 			est.GPUBytes += est.ProjectorBytes
 		} else {
@@ -213,23 +253,67 @@ func EstimateMemory(in EstimateInput) Estimate {
 		} else {
 			est.CPUBytes += est.MediaBytes
 		}
-		gpuFits := uint64(est.GPUBytes) <= est.BudgetBytes-est.BudgetBytes/10
-		cpuFits := uint64(est.CPUBytes) <= in.RAM-in.RAM/10
-		est.Fits = gpuFits && cpuFits
-		return est
 	}
 
-	if in.GPUOffload {
-		est.GPUBytes = est.TotalBytes
-		if in.NoMmprojOffload && (est.ProjectorBytes > 0 || est.MediaBytes > 0) {
-			est.GPUBytes -= est.ProjectorBytes + est.MediaBytes
-			est.CPUBytes = est.ProjectorBytes + est.MediaBytes
+	headroom := func(budget uint64) uint64 {
+		if budget == 0 {
+			return 0
 		}
-	} else {
-		est.CPUBytes = est.TotalBytes
+		return budget - budget/10
 	}
-	est.Fits = uint64(est.TotalBytes) <= est.BudgetBytes-est.BudgetBytes/10
-	return est
+
+	if unified {
+		// Everything competes for system RAM.
+		used := uint64(est.GPUBytes + est.CPUBytes)
+		est.FitsCPU = used <= headroom(est.CPUBudgetBytes)
+		est.FitsGPU = true
+		est.Fits = est.FitsCPU
+		return
+	}
+
+	if est.GPUBudgetBytes > 0 {
+		est.FitsGPU = uint64(est.GPUBytes) <= headroom(est.GPUBudgetBytes)
+	} else {
+		est.FitsGPU = est.GPUBytes == 0
+	}
+	est.FitsCPU = uint64(est.CPUBytes) <= headroom(est.CPUBudgetBytes)
+	est.Fits = est.FitsGPU && est.FitsCPU
+}
+
+// offloadFraction returns how much of the model layers land on the GPU.
+// When layer metadata is missing but OffloadedLayers is set (custom slider
+// with unknown block_count), treat OffloadedLayers as an absolute request
+// against a synthetic denominator so the estimate still reacts to the slider.
+func offloadFraction(in EstimateInput) float64 {
+	if !in.GPUOffload {
+		return 0
+	}
+	layers := in.Layers
+	off := in.OffloadedLayers
+	if layers == 0 {
+		if off == 0 {
+			// "all" / auto with unknown layer count → assume full offload.
+			return 1
+		}
+		// Custom N with unknown block_count: use N/(N) only when N looks like
+		// "all" sentinel (999), otherwise scale against a soft max of max(N, 32).
+		if off >= 999 {
+			return 1
+		}
+		den := off
+		if den < 32 {
+			den = 32
+		}
+		f := float64(off) / float64(den)
+		if f > 1 {
+			f = 1
+		}
+		return f
+	}
+	if off >= layers {
+		return 1
+	}
+	return float64(off) / float64(layers)
 }
 
 // estimateKVCache walks layers with SWA / hybrid / shared-KV awareness.

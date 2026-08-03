@@ -269,7 +269,7 @@ Dialog {
                         id: estCol
                         anchors.fill: parent
                         anchors.margins: 10
-                        spacing: 2
+                        spacing: 4
                         RowLayout {
                             Label {
                                 text: "Estimated memory"
@@ -279,20 +279,107 @@ Dialog {
                             Item { Layout.fillWidth: true }
                             Label {
                                 text: root.estimate
-                                    ? AppTheme.bytes(root.estimate.total_bytes) + " / "
-                                      + AppTheme.bytes(root.estimate.budget_bytes) + " " + root.estimate.budget_kind
+                                    ? AppTheme.bytes(root.estimate.total_bytes) + " total"
                                     : "…"
-                                color: root.estimate ? (root.estimate.fits ? AppTheme.success : AppTheme.danger) : AppTheme.textDim
+                                color: root.estimate
+                                    ? (root.estimate.fits ? AppTheme.success : AppTheme.danger)
+                                    : AppTheme.textDim
                                 font.weight: Font.DemiBold
                             }
                         }
-                        ProgressBar {
+
+                        // GPU VRAM row
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 8
-                            from: 0; to: 1
-                            value: root.estimate && root.estimate.budget_bytes > 0
-                                ? Math.min(1, root.estimate.total_bytes / root.estimate.budget_bytes) : 0
+                            spacing: 2
+                            visible: root.estimate && (root.estimate.gpu_budget_bytes > 0
+                                     || root.estimate.gpu_bytes > 0
+                                     || root.settings.gpu_offload !== "none")
+                            RowLayout {
+                                Label {
+                                    text: "GPU VRAM"
+                                    color: AppTheme.textDim
+                                    font.pixelSize: AppTheme.fontSmall
+                                }
+                                Item { Layout.fillWidth: true }
+                                Label {
+                                    text: {
+                                        if (!root.estimate) return ""
+                                        var used = root.estimate.gpu_bytes || 0
+                                        var bud = root.estimate.gpu_budget_bytes || 0
+                                        if (bud > 0)
+                                            return AppTheme.bytes(used) + " / " + AppTheme.bytes(bud)
+                                        return AppTheme.bytes(used)
+                                    }
+                                    color: root.estimate
+                                        ? ((root.estimate.fits_gpu !== false) ? AppTheme.text : AppTheme.danger)
+                                        : AppTheme.textDim
+                                    font.pixelSize: AppTheme.fontSmall
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 8
+                                from: 0; to: 1
+                                value: {
+                                    if (!root.estimate) return 0
+                                    var bud = root.estimate.gpu_budget_bytes || 0
+                                    if (bud <= 0) return root.estimate.gpu_bytes > 0 ? 1 : 0
+                                    return Math.min(1, (root.estimate.gpu_bytes || 0) / bud)
+                                }
+                            }
                         }
+
+                        // System RAM row
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            visible: !!root.estimate
+                            RowLayout {
+                                Label {
+                                    text: root.estimate && root.estimate.budget_kind === "unified RAM"
+                                          ? "System RAM (unified)"
+                                          : "System RAM"
+                                    color: AppTheme.textDim
+                                    font.pixelSize: AppTheme.fontSmall
+                                }
+                                Item { Layout.fillWidth: true }
+                                Label {
+                                    text: {
+                                        if (!root.estimate) return ""
+                                        var used = root.estimate.cpu_bytes || 0
+                                        // Unified: GPU+CPU compete for RAM.
+                                        if (root.estimate.budget_kind === "unified RAM")
+                                            used = (root.estimate.gpu_bytes || 0) + (root.estimate.cpu_bytes || 0)
+                                        var bud = root.estimate.cpu_budget_bytes || 0
+                                        if (bud > 0)
+                                            return AppTheme.bytes(used) + " / " + AppTheme.bytes(bud)
+                                        return AppTheme.bytes(used)
+                                    }
+                                    color: root.estimate
+                                        ? ((root.estimate.fits_cpu !== false) ? AppTheme.text : AppTheme.danger)
+                                        : AppTheme.textDim
+                                    font.pixelSize: AppTheme.fontSmall
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                            ProgressBar {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 8
+                                from: 0; to: 1
+                                value: {
+                                    if (!root.estimate) return 0
+                                    var used = root.estimate.cpu_bytes || 0
+                                    if (root.estimate.budget_kind === "unified RAM")
+                                        used = (root.estimate.gpu_bytes || 0) + (root.estimate.cpu_bytes || 0)
+                                    var bud = root.estimate.cpu_budget_bytes || 0
+                                    if (bud <= 0) return used > 0 ? 1 : 0
+                                    return Math.min(1, used / bud)
+                                }
+                            }
+                        }
+
                         Label {
                             Layout.fillWidth: true
                             text: {
@@ -312,9 +399,8 @@ Dialog {
                                     parts.push("media " + AppTheme.bytes(e.media_bytes))
                                 parts.push("overhead " + AppTheme.bytes(e.overhead_bytes || 0))
                                 var line = parts.join(" · ")
-                                if (e.gpu_bytes > 0 && e.cpu_bytes > 0)
-                                    line += "  |  GPU " + AppTheme.bytes(e.gpu_bytes)
-                                        + " · CPU " + AppTheme.bytes(e.cpu_bytes)
+                                if (e.offload_fraction > 0 && e.offload_fraction < 1)
+                                    line += "  |  offload " + Math.round(e.offload_fraction * 100) + "%"
                                 if (e.note && e.note !== "")
                                     line += "  —  " + e.note
                                 return line
@@ -326,7 +412,15 @@ Dialog {
                         Label {
                             visible: root.estimate && !root.estimate.fits
                             Layout.fillWidth: true
-                            text: "Likely exceeds available memory — reduce context, KV type, or GPU offload."
+                            text: {
+                                if (!root.estimate) return ""
+                                var bits = []
+                                if (root.estimate.fits_gpu === false) bits.push("GPU VRAM")
+                                if (root.estimate.fits_cpu === false) bits.push("system RAM")
+                                if (bits.length === 0) bits.push("available memory")
+                                return "Likely exceeds " + bits.join(" and ")
+                                    + " — reduce context, KV type, or GPU layers."
+                            }
                             color: AppTheme.warning
                             font.pixelSize: AppTheme.fontSmall
                             wrapMode: Text.WordWrap

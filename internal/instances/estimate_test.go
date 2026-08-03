@@ -21,11 +21,17 @@ func TestEstimateKVCache(t *testing.T) {
 	if est.KVCacheBytes != wantKV {
 		t.Errorf("kv = %d, want %d", est.KVCacheBytes, wantKV)
 	}
-	if est.BudgetKind != "VRAM" || est.BudgetBytes != 8<<30 {
+	if est.BudgetKind != "VRAM+RAM" || est.BudgetBytes != 8<<30 {
 		t.Errorf("budget = %s %d", est.BudgetKind, est.BudgetBytes)
 	}
-	if !est.Fits {
-		t.Error("4 GiB model + small ctx should fit 8 GiB VRAM")
+	if est.GPUBudgetBytes != 8<<30 || est.CPUBudgetBytes != 32<<30 {
+		t.Errorf("gpu_budget=%d cpu_budget=%d", est.GPUBudgetBytes, est.CPUBudgetBytes)
+	}
+	if !est.FitsGPU || !est.FitsCPU || !est.Fits {
+		t.Error("4 GiB model + small ctx should fit 8 GiB VRAM and 32 GiB RAM")
+	}
+	if est.OffloadFraction != 1 {
+		t.Errorf("full offload fraction = %v, want 1", est.OffloadFraction)
 	}
 }
 
@@ -139,9 +145,52 @@ func TestEstimatePartialOffload(t *testing.T) {
 	if est.GPUBytes+est.CPUBytes != est.TotalBytes {
 		t.Errorf("gpu+cpu (%d) != total (%d)", est.GPUBytes+est.CPUBytes, est.TotalBytes)
 	}
+	if est.OffloadFraction != 0.5 {
+		t.Errorf("offload_fraction = %v, want 0.5", est.OffloadFraction)
+	}
 	halfW := int64(0.5 * float64(8<<30))
 	if est.CPUBytes != halfW+est.KVCacheBytes/2 {
 		t.Errorf("cpu share wrong: %d (want weights/2 + kv/2 = %d)", est.CPUBytes, halfW+est.KVCacheBytes/2)
+	}
+	if est.BudgetKind != "VRAM+RAM" {
+		t.Errorf("budget_kind = %s, want VRAM+RAM", est.BudgetKind)
+	}
+}
+
+func TestEstimatePartialOffloadChangesWithLayers(t *testing.T) {
+	in := EstimateInput{
+		Weights: 8 << 30, Layers: 32, KVHeads: 8, HeadDim: 128,
+		Ctx: 4096, GPUOffload: true, VRAM: 16 << 30, RAM: 64 << 30,
+	}
+	in.OffloadedLayers = 8
+	low := EstimateMemory(in)
+	in.OffloadedLayers = 24
+	high := EstimateMemory(in)
+	if low.GPUBytes >= high.GPUBytes {
+		t.Errorf("more layers offloaded should increase GPU bytes: low=%d high=%d", low.GPUBytes, high.GPUBytes)
+	}
+	if low.CPUBytes <= high.CPUBytes {
+		t.Errorf("more layers offloaded should decrease CPU bytes: low=%d high=%d", low.CPUBytes, high.CPUBytes)
+	}
+	if low.TotalBytes != high.TotalBytes {
+		t.Errorf("total should stay stable across placement: low=%d high=%d", low.TotalBytes, high.TotalBytes)
+	}
+}
+
+func TestEstimateCustomOffloadWithoutLayerCount(t *testing.T) {
+	in := EstimateInput{
+		Weights: 8 << 30, Layers: 0, KVHeads: 8, HeadDim: 128,
+		Ctx: 4096, GPUOffload: true, VRAM: 16 << 30, RAM: 64 << 30,
+	}
+	in.OffloadedLayers = 8
+	low := EstimateMemory(in)
+	in.OffloadedLayers = 24
+	high := EstimateMemory(in)
+	if !(low.OffloadFraction > 0 && low.OffloadFraction < high.OffloadFraction && high.OffloadFraction < 1) {
+		t.Fatalf("fractions should rise with slider: low=%v high=%v", low.OffloadFraction, high.OffloadFraction)
+	}
+	if low.GPUBytes >= high.GPUBytes || low.CPUBytes <= high.CPUBytes {
+		t.Errorf("unknown block_count must still move GPU/CPU with custom layers")
 	}
 }
 
@@ -151,8 +200,31 @@ func TestEstimatePartialOffloadFitFailure(t *testing.T) {
 		Ctx: 4096, GPUOffload: true, OffloadedLayers: 16,
 		VRAM: 4 << 30, RAM: 128 << 30,
 	})
-	if est.Fits {
+	if est.FitsGPU {
 		t.Error("half of a 20 GiB model must not fit in 4 GiB VRAM")
+	}
+	if !est.FitsCPU {
+		t.Error("CPU share should still fit in 128 GiB RAM")
+	}
+	if est.Fits {
+		t.Error("overall Fits must be false when GPU does not fit")
+	}
+}
+
+func TestEstimateIndependentCPUFit(t *testing.T) {
+	est := EstimateMemory(EstimateInput{
+		Weights: 8 << 30, Layers: 32, KVHeads: 8, HeadDim: 128,
+		Ctx: 4096, GPUOffload: true, OffloadedLayers: 8,
+		VRAM: 24 << 30, RAM: 2 << 30,
+	})
+	if !est.FitsGPU {
+		t.Error("small GPU share should fit 24 GiB VRAM")
+	}
+	if est.FitsCPU {
+		t.Error("large CPU remainder must not fit 2 GiB RAM")
+	}
+	if est.Fits {
+		t.Error("overall Fits must require both budgets")
 	}
 }
 

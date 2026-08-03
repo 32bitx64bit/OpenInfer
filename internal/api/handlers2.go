@@ -351,15 +351,24 @@ func (h *handlers) estimateLoad(w http.ResponseWriter, r *http.Request) {
 			draftWeights = st.Size()
 		}
 	}
-	// Resolve offloaded layer count for partial-offload estimation.
+	// Resolve offloaded layer count for GPU/CPU placement.
 	offloaded := meta.BlockCount
-	if s.GPUOffload == "custom" && s.GPULayers > 0 {
-		offloaded = uint32(s.GPULayers)
+	switch s.GPUOffload {
+	case "none":
+		offloaded = 0
+	case "custom":
+		if s.GPULayers > 0 {
+			offloaded = uint32(s.GPULayers)
+		} else {
+			offloaded = 0
+		}
 		if meta.BlockCount > 0 && offloaded > meta.BlockCount {
 			offloaded = meta.BlockCount
 		}
-	} else if !offload {
-		offloaded = 0
+	default: // auto|all
+		if meta.BlockCount == 0 {
+			offloaded = 999 // full-offload sentinel when layer count unknown
+		}
 	}
 	est := instances.EstimateMemory(instances.EstimateInput{
 		Weights: m.SizeBytes - proj, DraftWeights: draftWeights, Projector: proj,
