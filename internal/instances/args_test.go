@@ -207,3 +207,92 @@ func TestBuildArgsNoMmproj(t *testing.T) {
 		t.Fatalf("expected projector skipped resolution: %+v", br.Resolutions)
 	}
 }
+
+func TestBuildArgsExpertPerfFlags(t *testing.T) {
+	help := testHelp + `
+  --threads-batch N
+  --cont-batching
+  --no-cont-batching
+  --cache-reuse N
+  --prio N
+  --poll N
+  --numa TYPE
+  --kv-offload
+  --no-kv-offload
+  --op-offload
+  --no-op-offload
+  --kv-unified
+  --no-kv-unified
+  --swa-full
+  --cpu-moe
+  --n-cpu-moe N
+  --fit [on|off]
+  --no-warmup
+  --main-gpu N
+  --device DEV
+  --split-mode MODE
+  --tensor-split N
+`
+	caps := append(testCaps(),
+		"threads-batch", "cont-batching", "no-cont-batching", "cache-reuse",
+		"prio", "poll", "numa", "kv-offload", "no-kv-offload",
+		"op-offload", "no-op-offload", "kv-unified", "no-kv-unified",
+		"swa-full", "cpu-moe", "n-cpu-moe", "fit", "no-warmup",
+		"main-gpu", "device", "split-mode", "tensor-split",
+	)
+	on := true
+	s := DefaultSettings()
+	s.ThreadsBatch = 12
+	s.ContBatching = &on
+	s.CacheReuse = 256
+	s.Prio = 2
+	s.Poll = 80
+	s.NUMA = "isolate"
+	s.KVOffload = "off"
+	s.OpOffload = "on"
+	s.KVUnified = "on"
+	s.SWAFull = true
+	s.CPUMoe = true
+	s.NCPUMoe = 0
+	s.Fit = "on"
+	s.NoWarmup = true
+	s.MainGPU = 1
+	s.Device = "Vulkan0"
+	s.SplitMode = "row"
+	s.TensorSplit = "3,1"
+
+	br := BuildArgs(s, "/models/m.gguf", "", caps, help, "127.0.0.1", 8123, "k")
+	joined := strings.Join(br.Args, " ")
+	for _, want := range []string{
+		"--threads-batch 12",
+		"--cont-batching",
+		"--cache-reuse 256",
+		"--prio 2",
+		"--poll 80",
+		"--numa isolate",
+		"--no-kv-offload",
+		"--op-offload",
+		"--kv-unified",
+		"--swa-full",
+		"--cpu-moe",
+		"--fit on",
+		"--no-warmup",
+		"--main-gpu 1",
+		"--device Vulkan0",
+		"--split-mode row",
+		"--tensor-split 3,1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %q", want, joined)
+		}
+	}
+	// Unset sentinels must not emit flags.
+	s2 := DefaultSettings()
+	br2 := BuildArgs(s2, "/models/m.gguf", "", caps, help, "127.0.0.1", 8123, "k")
+	j2 := strings.Join(br2.Args, " ")
+	for _, bad := range []string{"--prio", "--poll", "--threads-batch", "--fit", "--cpu-moe"} {
+		if strings.Contains(j2, bad) {
+			t.Errorf("default settings must omit %s: %q", bad, j2)
+		}
+	}
+}

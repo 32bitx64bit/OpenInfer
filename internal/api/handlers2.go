@@ -188,6 +188,26 @@ func decodeSettings(w http.ResponseWriter, r *http.Request) (instances.LoadSetti
 		writeErr(w, 400, "threads out of range", nil)
 		return s, false
 	}
+	if s.ThreadsBatch < 0 || s.ThreadsBatch > 1024 {
+		writeErr(w, 400, "threads_batch out of range", nil)
+		return s, false
+	}
+	if s.Prio < -2 || s.Prio > 3 {
+		writeErr(w, 400, "prio out of range", nil)
+		return s, false
+	}
+	if s.Poll < -1 || s.Poll > 100 {
+		writeErr(w, 400, "poll out of range", nil)
+		return s, false
+	}
+	if s.NCPUMoe < 0 || s.NCPUMoe > 4096 {
+		writeErr(w, 400, "n_cpu_moe out of range", nil)
+		return s, false
+	}
+	if s.CacheReuse < 0 || s.CacheReuse > 1<<20 {
+		writeErr(w, 400, "cache_reuse out of range", nil)
+		return s, false
+	}
 	if s.DraftMax < 0 || s.DraftMax > 256 {
 		writeErr(w, 400, "draft_max out of range", nil)
 		return s, false
@@ -216,6 +236,33 @@ func decodeSettings(w http.ResponseWriter, r *http.Request) (instances.LoadSetti
 	case "", "auto", "on", "off":
 	default:
 		writeErr(w, 400, "invalid flash_attention value", nil)
+		return s, false
+	}
+	for _, pair := range []struct {
+		name, v string
+	}{
+		{"kv_offload", s.KVOffload},
+		{"op_offload", s.OpOffload},
+		{"kv_unified", s.KVUnified},
+		{"fit", s.Fit},
+	} {
+		switch strings.ToLower(strings.TrimSpace(pair.v)) {
+		case "", "on", "off":
+		default:
+			writeErr(w, 400, "invalid "+pair.name+" value", nil)
+			return s, false
+		}
+	}
+	switch s.NUMA {
+	case "", "distribute", "isolate", "numactl":
+	default:
+		writeErr(w, 400, "invalid numa value", nil)
+		return s, false
+	}
+	switch s.SplitMode {
+	case "", "none", "layer", "row", "tensor":
+	default:
+		writeErr(w, 400, "invalid split_mode value", nil)
 		return s, false
 	}
 	return s, true

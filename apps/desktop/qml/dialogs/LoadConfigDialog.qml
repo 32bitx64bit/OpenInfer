@@ -36,6 +36,12 @@ Dialog {
         "threads": 0, "flash_attention": "auto", "parallel": 0,
         "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
         "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
+        "tensor_split": "", "device": "", "numa": "",
+        "cont_batching": null, "cache_reuse": 0,
+        "threads_batch": 0, "prio": -2, "poll": -1,
+        "cpu_moe": false, "n_cpu_moe": 0,
+        "kv_offload": "", "op_offload": "", "kv_unified": "",
+        "swa_full": false, "fit": "", "no_warmup": false,
         "rope_scaling": "", "alias": "", "raw_args": "",
         "jinja": false, "no_mmproj": false, "no_mmproj_offload": false,
         "draft_model": "", "draft_max": 0, "draft_min": 0, "spec_type": "",
@@ -74,6 +80,12 @@ Dialog {
             "threads": 0, "flash_attention": "auto", "parallel": 0,
             "batch_size": 0, "ubatch_size": 0, "cache_type_k": "", "cache_type_v": "",
             "no_mmap": false, "mlock": false, "main_gpu": -1, "split_mode": "",
+            "tensor_split": "", "device": "", "numa": "",
+            "cont_batching": null, "cache_reuse": 0,
+            "threads_batch": 0, "prio": -2, "poll": -1,
+            "cpu_moe": false, "n_cpu_moe": 0,
+            "kv_offload": "", "op_offload": "", "kv_unified": "",
+            "swa_full": false, "fit": "", "no_warmup": false,
             "rope_scaling": "", "alias": m.alias || "", "raw_args": "",
             "jinja": root.isMultimodal(m), "no_mmproj": false, "no_mmproj_offload": false,
             "draft_model": "", "draft_max": 0, "draft_min": 0, "spec_type": "",
@@ -860,6 +872,300 @@ Dialog {
                     Layout.fillWidth: true
                     visible: expertToggle.checked
                     spacing: AppTheme.gap
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Performance and multi-GPU knobs. Empty / default leaves llama.cpp defaults. Unsupported flags are skipped in the command preview."
+                        color: AppTheme.textFaint
+                        font.pixelSize: AppTheme.fontSmall
+                        wrapMode: Text.WordWrap
+                    }
+
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Batch threads"
+                        argName: "--threads-batch"
+                        hint: "CPU threads for prompt / batch processing. 0 = same as --threads. Higher can speed prefills."
+                        SpinBox {
+                            from: 0; to: 256; editable: true
+                            value: root.settings.threads_batch || 0
+                            onValueModified: root.setSetting("threads_batch", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Continuous batching"
+                        argName: "--cont-batching"
+                        hint: "Dynamic batching across slots. Improves multi-request throughput; leave default for single-chat."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": "" },
+                                { "text": "on", "value": "on" },
+                                { "text": "off", "value": "off" }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.cont_batching
+                                if (v === true) return 1
+                                if (v === false) return 2
+                                return 0
+                            }
+                            onActivated: function(i) {
+                                var v = model[i].value
+                                if (v === "") root.setSetting("cont_batching", null)
+                                else root.setSetting("cont_batching", v === "on")
+                            }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Cache reuse"
+                        argName: "--cache-reuse"
+                        hint: "Min chunk size (tokens) to reuse from the prompt cache via KV shifting. 0 = off / runtime default."
+                        SpinBox {
+                            from: 0; to: 65536; editable: true
+                            value: root.settings.cache_reuse || 0
+                            onValueModified: root.setSetting("cache_reuse", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Process priority"
+                        argName: "--prio"
+                        hint: "OS scheduling priority for the llama-server process."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": -2 },
+                                { "text": "low", "value": -1 },
+                                { "text": "normal", "value": 0 },
+                                { "text": "medium", "value": 1 },
+                                { "text": "high", "value": 2 },
+                                { "text": "realtime", "value": 3 }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.prio
+                                if (v === undefined || v === null) return 0
+                                for (var i = 0; i < model.length; i++)
+                                    if (model[i].value === v) return i
+                                return 0
+                            }
+                            onActivated: function(i) { root.setSetting("prio", model[i].value) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Work poll"
+                        argName: "--poll"
+                        hint: "CPU polling while waiting for work (0 = sleep, 50 = default, 100 = aggressive). Can cut latency at the cost of idle CPU."
+                        SpinBox {
+                            from: -1; to: 100; editable: true
+                            value: (root.settings.poll === undefined || root.settings.poll === null)
+                                   ? -1 : root.settings.poll
+                            textFromValue: function(v) { return v < 0 ? "default" : String(v) }
+                            valueFromText: function(t) {
+                                t = String(t).trim().toLowerCase()
+                                if (t === "" || t === "default") return -1
+                                var n = parseInt(t, 10)
+                                return isNaN(n) ? -1 : n
+                            }
+                            onValueModified: root.setSetting("poll", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "NUMA"
+                        argName: "--numa"
+                        hint: "NUMA placement on multi-socket CPUs. Most desktops leave this empty."
+                        ComboBox {
+                            model: ["", "distribute", "isolate", "numactl"]
+                            currentIndex: Math.max(0, model.indexOf(root.settings.numa || ""))
+                            onActivated: function(i) { root.setSetting("numa", model[i]) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Fit to device memory"
+                        argName: "--fit"
+                        hint: "Auto-adjust unset args (context / layers) so the load fits VRAM."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": "" },
+                                { "text": "on", "value": "on" },
+                                { "text": "off", "value": "off" }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.fit || ""
+                                for (var i = 0; i < model.length; i++)
+                                    if (model[i].value === v) return i
+                                return 0
+                            }
+                            onActivated: function(i) { root.setSetting("fit", model[i].value) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "KV cache offload"
+                        argName: "--kv-offload"
+                        hint: "Keep KV cache on GPU (on) or force it to system RAM (off). Off frees VRAM but is slower."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": "" },
+                                { "text": "on", "value": "on" },
+                                { "text": "off", "value": "off" }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.kv_offload || ""
+                                for (var i = 0; i < model.length; i++)
+                                    if (model[i].value === v) return i
+                                return 0
+                            }
+                            onActivated: function(i) { root.setSetting("kv_offload", model[i].value) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Op offload"
+                        argName: "--op-offload"
+                        hint: "Offload host tensor ops to the GPU device (default on). Rarely disable unless debugging."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": "" },
+                                { "text": "on", "value": "on" },
+                                { "text": "off", "value": "off" }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.op_offload || ""
+                                for (var i = 0; i < model.length; i++)
+                                    if (model[i].value === v) return i
+                                return 0
+                            }
+                            onActivated: function(i) { root.setSetting("op_offload", model[i].value) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Unified KV buffer"
+                        argName: "--kv-unified"
+                        hint: "Single KV buffer shared across sequences. Helps multi-slot / continuous batching."
+                        ComboBox {
+                            model: [
+                                { "text": "default", "value": "" },
+                                { "text": "on", "value": "on" },
+                                { "text": "off", "value": "off" }
+                            ]
+                            textRole: "text"
+                            currentIndex: {
+                                var v = root.settings.kv_unified || ""
+                                for (var i = 0; i < model.length; i++)
+                                    if (model[i].value === v) return i
+                                return 0
+                            }
+                            onActivated: function(i) { root.setSetting("kv_unified", model[i].value) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Full SWA cache"
+                        argName: "--swa-full"
+                        hint: "Use a full-size sliding-window attention cache. More memory; can help some SWA models."
+                        Switch {
+                            checked: !!root.settings.swa_full
+                            onToggled: root.setSetting("swa_full", checked)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Keep MoE on CPU"
+                        argName: "--cpu-moe"
+                        hint: "Leave all Mixture-of-Experts weights in system RAM. Frees VRAM on MoE models."
+                        Switch {
+                            checked: !!root.settings.cpu_moe
+                            onToggled: root.setSetting("cpu_moe", checked)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "MoE layers on CPU"
+                        argName: "--n-cpu-moe"
+                        hint: "Keep MoE weights of the first N layers on CPU. 0 = unset (use --cpu-moe for all)."
+                        SpinBox {
+                            from: 0; to: 512; editable: true
+                            value: root.settings.n_cpu_moe || 0
+                            onValueModified: root.setSetting("n_cpu_moe", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Main GPU"
+                        argName: "--main-gpu"
+                        hint: "Primary GPU index for single-GPU or row-split intermediate/KV. -1 = unset."
+                        SpinBox {
+                            from: -1; to: 15; editable: true
+                            value: (root.settings.main_gpu === undefined || root.settings.main_gpu === null)
+                                   ? -1 : root.settings.main_gpu
+                            onValueModified: root.setSetting("main_gpu", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Devices"
+                        argName: "--device"
+                        hint: "Comma-separated device list for offload (e.g. Vulkan0,Vulkan1). Empty = all; none = no offload."
+                        TextField {
+                            width: parent.width
+                            text: root.settings.device || ""
+                            placeholderText: "Vulkan0,Vulkan1"
+                            onEditingFinished: root.setSetting("device", text.trim())
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Split mode"
+                        argName: "--split-mode"
+                        hint: "How to split across GPUs: layer (pipelined), row, or tensor."
+                        ComboBox {
+                            model: ["", "none", "layer", "row", "tensor"]
+                            currentIndex: Math.max(0, model.indexOf(root.settings.split_mode || ""))
+                            onActivated: function(i) { root.setSetting("split_mode", model[i]) }
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Tensor split"
+                        argName: "--tensor-split"
+                        hint: "Per-GPU fractions, e.g. 3,1 for a 75/25 split."
+                        TextField {
+                            width: parent.width
+                            text: root.settings.tensor_split || ""
+                            placeholderText: "3,1"
+                            onEditingFinished: root.setSetting("tensor_split", text.trim())
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Draft tokens (min)"
+                        argName: "--spec-draft-n-min"
+                        hint: "Minimum draft tokens per speculative step. 0 = runtime default."
+                        SpinBox {
+                            from: 0; to: 64; editable: true
+                            value: root.settings.draft_min || 0
+                            onValueModified: root.setSetting("draft_min", value)
+                        }
+                    }
+                    FormField {
+                        Layout.fillWidth: true
+                        label: "Skip warmup"
+                        argName: "--no-warmup"
+                        hint: "Skip the empty warmup run at start. Faster load; first real request may be slower."
+                        Switch {
+                            checked: !!root.settings.no_warmup
+                            onToggled: root.setSetting("no_warmup", checked)
+                        }
+                    }
 
                     FormField {
                         Layout.fillWidth: true

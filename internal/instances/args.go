@@ -31,6 +31,17 @@ type LoadSettings struct {
 	TensorSplit     string            `json:"tensor_split"`
 	ContBatching    *bool             `json:"cont_batching"`
 	CacheReuse      int               `json:"cache_reuse"`
+	ThreadsBatch    int               `json:"threads_batch"` // 0 = same as --threads
+	Prio            int               `json:"prio"`          // -2 = unset; -1..3 = llama --prio
+	Poll            int               `json:"poll"`          // -1 = unset; 0..100 = --poll
+	CPUMoe          bool              `json:"cpu_moe"`
+	NCPUMoe         int               `json:"n_cpu_moe"`  // 0 = unset
+	KVOffload       string            `json:"kv_offload"` // ""|on|off → --kv-offload / --no-kv-offload
+	OpOffload       string            `json:"op_offload"` // ""|on|off → --op-offload / --no-op-offload
+	KVUnified       string            `json:"kv_unified"` // ""|on|off → --kv-unified / --no-kv-unified
+	SWAFull         bool              `json:"swa_full"`
+	Fit             string            `json:"fit"` // ""|on|off → --fit
+	NoWarmup        bool              `json:"no_warmup"`
 	RopeScaling     string            `json:"rope_scaling"`
 	RopeFreqBase    float64           `json:"rope_freq_base"`
 	RopeFreqScale   float64           `json:"rope_freq_scale"`
@@ -66,7 +77,8 @@ type LoadSettings struct {
 // explicit opt-in, not the default. GPU offload defaults to all layers.
 func DefaultSettings() LoadSettings {
 	return LoadSettings{
-		ContextLength: 4096, GPUOffload: "all", FlashAttention: "auto", MainGPU: -1,
+		ContextLength: 4096, GPUOffload: "all", FlashAttention: "auto",
+		MainGPU: -1, Prio: -2, Poll: -1,
 	}
 }
 
@@ -186,6 +198,10 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	} else {
 		res = append(res, Resolution{"CPU threads", "auto", "runtime default"})
 	}
+	if s.ThreadsBatch > 0 {
+		add("--threads-batch", strconv.Itoa(s.ThreadsBatch))
+		res = append(res, Resolution{"Batch threads", "same as --threads", strconv.Itoa(s.ThreadsBatch)})
+	}
 
 	// Flash attention. Newer llama.cpp builds take a value
 	// (--flash-attn on|off|auto); older ones use a bare boolean switch.
@@ -267,6 +283,52 @@ func BuildArgs(s LoadSettings, modelPath, projectorPath string,
 	}
 	if s.CacheReuse > 0 {
 		add("--cache-reuse", strconv.Itoa(s.CacheReuse))
+	}
+	// Process scheduling / latency knobs (expert).
+	if s.Prio >= -1 && s.Prio <= 3 {
+		add("--prio", strconv.Itoa(s.Prio))
+	}
+	if s.Poll >= 0 && s.Poll <= 100 {
+		add("--poll", strconv.Itoa(s.Poll))
+	}
+	if s.CPUMoe {
+		add("--cpu-moe")
+	}
+	if s.NCPUMoe > 0 {
+		add("--n-cpu-moe", strconv.Itoa(s.NCPUMoe))
+	}
+	addOnOff := func(v, onFlag, offFlag, label string) {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "on", "1", "true":
+			add(onFlag)
+			res = append(res, Resolution{label, "default", "on"})
+		case "off", "0", "false":
+			add(offFlag)
+			res = append(res, Resolution{label, "default", "off"})
+		}
+	}
+	addOnOff(s.KVOffload, "--kv-offload", "--no-kv-offload", "KV offload")
+	addOnOff(s.OpOffload, "--op-offload", "--no-op-offload", "Op offload")
+	addOnOff(s.KVUnified, "--kv-unified", "--no-kv-unified", "Unified KV")
+	if s.SWAFull {
+		add("--swa-full")
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Fit)) {
+	case "on":
+		if runtimes.FlagTakesValue(help, "--fit") {
+			add("--fit", "on")
+		} else {
+			add("--fit")
+		}
+		res = append(res, Resolution{"Fit to VRAM", "default", "on"})
+	case "off":
+		if runtimes.FlagTakesValue(help, "--fit") {
+			add("--fit", "off")
+		}
+		res = append(res, Resolution{"Fit to VRAM", "default", "off"})
+	}
+	if s.NoWarmup {
+		add("--no-warmup")
 	}
 	if s.RopeScaling != "" {
 		add("--rope-scaling", s.RopeScaling)
