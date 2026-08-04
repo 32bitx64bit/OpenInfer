@@ -3,6 +3,7 @@
         <file>qml/Main.qml</file>
         <file>qml/AppTheme.qml</file>
         <file>qml/qmldir</file>
+        <file>qml/js/codeHighlight.js</file>
         <file>qml/services/Api.qml</file>
         <file>qml/services/Events.qml</file>
         <file>qml/components/NavButton.qml</file>
@@ -12,6 +13,7 @@
         <file>qml/components/ConfirmDialog.qml</file>
         <file>qml/components/FormField.qml</file>
         <file>qml/components/StatusDot.qml</file>
+        <file>qml/components/ChatMessageContent.qml</file>
         <file>qml/dialogs/LoadConfigDialog.qml</file>
         <file>qml/dialogs/FailureDialog.qml</file>
         <file>qml/pages/ChatPage.qml</file>

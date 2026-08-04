@@ -630,16 +630,11 @@ Item {
                                     }
                                 }
 
-                                TextEdit {
+                                ChatMessageContent {
                                     Layout.fillWidth: true
                                     visible: (modelData.id === page.streamingId ? page.streamContent : modelData.content) !== ""
-                                    text: modelData.id === page.streamingId ? page.streamContent : modelData.content
-                                    textFormat: TextEdit.MarkdownText
-                                    readOnly: true
-                                    selectByMouse: true
-                                    wrapMode: TextEdit.Wrap
-                                    color: AppTheme.text
-                                    font.pixelSize: AppTheme.fontBody
+                                    content: modelData.id === page.streamingId ? page.streamContent : modelData.content
+                                    streaming: modelData.id === page.streamingId
                                 }
 
                                 Label {
