@@ -16,6 +16,7 @@
         <file>qml/components/ChatMessageContent.qml</file>
         <file>qml/dialogs/LoadConfigDialog.qml</file>
         <file>qml/dialogs/FailureDialog.qml</file>
+        <file>qml/dialogs/OnboardingDialog.qml</file>
         <file>qml/pages/ChatPage.qml</file>
         <file>qml/pages/DiscoverPage.qml</file>
         <file>qml/pages/LibraryPage.qml</file>

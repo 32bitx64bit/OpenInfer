@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import "services"
 import "components"
 import "pages"
+import "dialogs"
 import "."
 
 ApplicationWindow {
@@ -48,11 +49,34 @@ ApplicationWindow {
     property var recommendation: null
     property int downloadCount: 0
     property bool experimentalAudioModels: false
+    property bool onboardingCompleted: true
+    property bool onboardingPrompted: false
 
     function refreshSettings() {
         api.get("/api/v1/settings", function(st, data) {
-            if (st === 200 && data)
-                window.experimentalAudioModels = (data["experimental.audio_models"] || "0") === "1"
+            if (st !== 200 || !data) return
+            window.experimentalAudioModels = (data["experimental.audio_models"] || "0") === "1"
+            window.onboardingCompleted = (data["onboarding.completed"] || "0") === "1"
+            window.maybeOpenOnboarding()
+        })
+    }
+    function maybeOpenOnboarding() {
+        if (window.onboardingCompleted || window.onboardingPrompted)
+            return
+        // Wait for hardware recommendation when possible so step 2 can pick a backend.
+        if (window.hardware === null && window.recommendation === null)
+            return
+        window.onboardingPrompted = true
+        // Existing installs: skip the wizard silently once they already have
+        // a runtime. Only prompt true first-run empties.
+        api.get("/api/v1/runtimes", function(rst, rdata) {
+            var runtimes = (rst === 200 && rdata) ? (rdata.runtimes || []) : []
+            if (runtimes.length > 0) {
+                api.put("/api/v1/settings/onboarding.completed", { "value": "1" }, function() {})
+                window.onboardingCompleted = true
+                return
+            }
+            onboardingDialog.openWizard()
         })
     }
     function refreshInstances() {
@@ -75,7 +99,10 @@ ApplicationWindow {
             if (st === 200 && data) {
                 window.hardware = data.hardware
                 window.recommendation = data.recommendation
+            } else {
+                window.hardware = window.hardware || ({})
             }
+            window.maybeOpenOnboarding()
         })
         for (var i = 0; i < stack.count; i++) {
             var p = stack.itemAt(i)
@@ -248,6 +275,11 @@ ApplicationWindow {
                         if (key === "experimental.audio_models")
                             window.experimentalAudioModels = value === "1"
                     }
+                    onReplayOnboarding: {
+                        window.onboardingCompleted = false
+                        window.onboardingPrompted = false
+                        onboardingDialog.openWizard()
+                    }
                 }
                 InstanceDetailPage {
                     id: instanceDetailPage
@@ -292,6 +324,17 @@ ApplicationWindow {
                 MouseArea { anchors.fill: parent; onClicked: toastModel.remove(index) }
             }
         }
+    }
+
+    OnboardingDialog {
+        id: onboardingDialog
+        parent: Overlay.overlay
+        api: api
+        events: events
+        recommendation: window.recommendation
+        stack: stack
+        onFinished: window.onboardingCompleted = true
+        onGoChat: stack.currentIndex = 0
     }
 
     Component.onCompleted: reloadAll()

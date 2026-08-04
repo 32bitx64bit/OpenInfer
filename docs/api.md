@@ -89,7 +89,7 @@ Events: `instance.state_changed`, `instance.updated`, `instance.activity`,
 | POST `/chat/{id}/generate` | `{parent_id?, content?, params?, audio?}` → streams `chat.token`; `audio` requires Settings `experimental.audio_models=1` and a `has_audio` model (`{path\|data, format?, name?}`) |
 | POST `/chat/{id}/stop` | cancel generation |
 
-Setting keys of note: `experimental.audio_models` (`"0"`/`"1"`, default off) gates audio discovery labels and chat audio attachments.
+Setting keys of note: `experimental.audio_models` (`"0"`/`"1"`, default off) gates audio discovery labels and chat audio attachments (stays experimental while upstream llama.cpp marks audio as such). `onboarding.completed` (`"0"`/`"1"`) tracks whether the first-run setup wizard has been finished or skipped.
 
 ## Public server
 

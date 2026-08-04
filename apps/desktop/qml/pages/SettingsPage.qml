@@ -17,6 +17,9 @@ Item {
     property string statusText: ""
     property var appStatus: null
 
+    signal settingChanged(string key, string value)
+    signal replayOnboarding()
+
     function reload() {
         api.get("/api/v1/status", function(st, data) {
             if (st === 200) page.appStatus = data
@@ -41,8 +44,6 @@ Item {
             if (st === 200) page.hfConfigured = data && data.configured
         })
     }
-
-    signal settingChanged(string key, string value)
 
     function setSetting(key, value) {
         var v = String(value)
@@ -315,6 +316,11 @@ Item {
                         text: "OpenInfer Studio"
                         color: AppTheme.text
                         font.weight: Font.DemiBold
+                    }
+                    Button {
+                        text: "Show setup guide"
+                        flat: true
+                        onClicked: page.replayOnboarding()
                     }
                     GridLayout {
                         columns: 2
