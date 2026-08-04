@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release as (e.g. v1.1.0). Leave empty to use VERSION file only."
+        description: "Tag to release as (e.g. v1.2.0). Leave empty to use VERSION file only."
         required: false
         default: ""
 
