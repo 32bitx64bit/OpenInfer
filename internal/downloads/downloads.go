@@ -445,9 +445,10 @@ func (m *Manager) downloadFile(ctx context.Context, id, dest string) error {
 	}
 	defer resp.Body.Close()
 
-	appendMode := true
+	appendMode := false
 	switch {
 	case resp.StatusCode == http.StatusPartialContent && offset > 0:
+		appendMode = true
 		if fr.resumable == -1 {
 			_, _ = m.db.Exec(`UPDATE download_files SET resumable = 1 WHERE download_id = ? AND dest_path = ?`, id, dest)
 		}
@@ -456,20 +457,19 @@ func (m *Manager) downloadFile(ctx context.Context, id, dest string) error {
 			// Server ignored Range: restart the file (state clearly recorded).
 			m.log.Info("server does not support ranges; restarting file", "url", fr.url)
 			_, _ = m.db.Exec(`UPDATE download_files SET resumable = 0, done_bytes = 0 WHERE download_id = ? AND dest_path = ?`, id, dest)
-			os.Remove(fr.partial)
 			offset = 0
-			appendMode = false
 		}
 	case resp.StatusCode == http.StatusRequestedRangeNotSatisfiable:
 		// Partial is as large as (or larger than) the remote: restart.
 		os.Remove(fr.partial)
-		offset = 0
-		appendMode = false
 		return m.downloadFile(ctx, id, dest)
 	default:
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, fr.url)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(fr.partial), 0o755); err != nil {
+		return err
+	}
 	flag := os.O_CREATE | os.O_WRONLY
 	if appendMode {
 		flag |= os.O_APPEND
@@ -479,6 +479,13 @@ func (m *Manager) downloadFile(ctx context.Context, id, dest string) error {
 	out, err := os.OpenFile(fr.partial, flag, 0o644)
 	if err != nil {
 		return err
+	}
+	// Defensive: ensure append resumes at the expected offset.
+	if appendMode {
+		if st, err := out.Stat(); err == nil && st.Size() != offset {
+			out.Close()
+			return fmt.Errorf("partial changed underfoot: size %d, expected offset %d", st.Size(), offset)
+		}
 	}
 
 	total := fr.size
@@ -526,6 +533,9 @@ func (m *Manager) downloadFile(ctx context.Context, id, dest string) error {
 	}
 	out.Close()
 	m.persistProgress(id, dest, written)
+	if st, err := os.Stat(fr.partial); err == nil && st.Size() != written {
+		return fmt.Errorf("partial size mismatch: counter %d, on disk %d", written, st.Size())
+	}
 	if fr.size > 0 && written != fr.size {
 		return fmt.Errorf("size mismatch: expected %d bytes, got %d", fr.size, written)
 	}

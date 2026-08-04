@@ -113,32 +113,45 @@ func TestDownloadSimple(t *testing.T) {
 
 func TestDownloadResume(t *testing.T) {
 	m, db, dir := testManager(t)
+	// Hold the queue so Enqueue's pump cannot start before the partial exists.
+	m.mu.Lock()
+	m.limit = 0
+	m.mu.Unlock()
+
 	body := []byte(strings.Repeat("0123456789abcdef", 100000)) // 1.6 MB
 	rs := &rangeServer{body: body, requests: new(int64)}
 	srv := httptest.NewServer(http.HandlerFunc(rs.handler))
 	defer srv.Close()
 
 	dest := filepath.Join(dir, "big.gguf")
-	id, _ := m.Enqueue("model", "resume-test", dir,
+	id, err := m.Enqueue("model", "resume-test", dir,
 		[]FileSpec{{URL: srv.URL + "/big.gguf", DestPath: dest, Size: int64(len(body))}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Simulate an interruption: write a partial and mark progress.
 	var partial string
-	db.QueryRow(`SELECT partial_path FROM download_files WHERE download_id = ?`, id).Scan(&partial)
-	os.WriteFile(partial, body[:500000], 0o644)
-	db.Exec(`UPDATE download_files SET done_bytes = 500000 WHERE download_id = ?`, id)
+	if err := db.QueryRow(`SELECT partial_path FROM download_files WHERE download_id = ?`, id).Scan(&partial); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partial, body[:500000], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE download_files SET done_bytes = 500000 WHERE download_id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
 
+	m.SetConcurrency(2)
 	state, err := m.WaitComplete(context.Background(), id)
 	if err != nil || state != "complete" {
 		t.Fatalf("state=%s err=%v", state, err)
 	}
 	got, _ := os.ReadFile(dest)
 	if len(got) != len(body) || string(got) != string(body) {
-		t.Fatalf("resumed content mismatch: %d bytes", len(got))
+		t.Fatalf("resumed content mismatch: %d bytes (want %d)", len(got), len(body))
 	}
-	// The resumed request must have used a Range header.
-	if atomic.LoadInt64(rs.requests) < 2 {
-		t.Logf("note: %d requests", atomic.LoadInt64(rs.requests))
+	if atomic.LoadInt64(rs.requests) < 1 {
+		t.Fatal("expected at least one HTTP request")
 	}
 }
 
@@ -180,6 +193,10 @@ func TestDownloadInterruptedThenRetried(t *testing.T) {
 
 func TestDownloadNoRangeRestart(t *testing.T) {
 	m, db, dir := testManager(t)
+	m.mu.Lock()
+	m.limit = 0
+	m.mu.Unlock()
+
 	body := []byte(strings.Repeat("y", 200000))
 	rs := &rangeServer{body: body, noRange: true, requests: new(int64)}
 	srv := httptest.NewServer(http.HandlerFunc(rs.handler))
@@ -192,6 +209,7 @@ func TestDownloadNoRangeRestart(t *testing.T) {
 	db.QueryRow(`SELECT partial_path FROM download_files WHERE download_id = ?`, id).Scan(&partial)
 	os.WriteFile(partial, body[:50000], 0o644)
 
+	m.SetConcurrency(2)
 	state, err := m.WaitComplete(context.Background(), id)
 	if err != nil || state != "complete" {
 		t.Fatalf("state=%s err=%v", state, err)
