@@ -317,7 +317,7 @@ func (m *Manager) RecoverAfterRestart() error {
 func (m *Manager) pump() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.running >= m.limit {
+	if m.limit < 1 || m.running >= m.limit {
 		return
 	}
 	rows, err := m.db.Query(`SELECT id FROM downloads WHERE state = 'queued' ORDER BY queue_pos LIMIT ?`,
@@ -334,6 +334,19 @@ func (m *Manager) pump() {
 	}
 	rows.Close()
 	for _, id := range ids {
+		// Claim atomically so a delayed pump cannot start the same item twice.
+		res, err := m.db.Exec(`UPDATE downloads SET state = 'active', error = '', updated_at = ? WHERE id = ? AND state = 'queued'`,
+			now(), id)
+		if err != nil {
+			continue
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			continue
+		}
+		if m.events != nil {
+			m.events.Publish("download.state_changed", map[string]any{"id": id, "state": "active", "error": ""})
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancels[id] = cancel
 		m.running++
@@ -349,10 +362,8 @@ func (m *Manager) pump() {
 }
 
 // run executes all files of one download sequentially.
+// Caller (pump) has already claimed the row as active.
 func (m *Manager) run(ctx context.Context, id string) {
-	if err := m.setState(id, "active", ""); err != nil {
-		return
-	}
 	files, err := m.filesOf(id)
 	if err != nil {
 		m.fail(id, err)
