@@ -173,8 +173,10 @@ func isASCIIAlnum(b byte) bool {
 
 func looksLikeSpeculativeDraftRepo(lowerID string, tags []string) bool {
 	// Official llama.cpp sidecar prefixes in repo ids / file names.
+	// Note: do not use a bare "mtp-" Contains check — fused trunks like
+	// "...-MTP-GGUF" contain the substring "mtp-" inside "mtp-gguf".
 	for _, h := range []string{
-		"/mtp-", "mtp-", "eagle3-", "dflash-", "dspark-",
+		"/mtp-", "eagle3-", "dflash-", "dspark-",
 		"eagle3", "eagle-3", "dflash", "dspark", "speculator",
 		"draft-eagle", "draft-dflash", "draft-mtp", "spec-draft",
 	} {
@@ -182,10 +184,105 @@ func looksLikeSpeculativeDraftRepo(lowerID string, tags []string) bool {
 			return true
 		}
 	}
+	if mtpSidecarInPath(lowerID) {
+		return true
+	}
 	for _, t := range tags {
 		lt := strings.ToLower(t)
 		if lt == "speculative-decoding" || lt == "eagle3" || lt == "dflash" ||
-			lt == "dspark" || lt == "mtp" || lt == "speculator" || lt == "draft-model" {
+			lt == "dspark" || lt == "speculator" || lt == "draft-model" {
+			return true
+		}
+	}
+	return false
+}
+
+// FileMTP classifies a single GGUF path for Discover grouping.
+// Returns "" | "mtp" | "mtp-draft".
+func FileMTP(path string) string {
+	base := strings.ToLower(filepath.Base(path))
+	if strings.HasPrefix(base, "mtp-") {
+		return "mtp-draft"
+	}
+	if containsMTPToken(base) {
+		return "mtp"
+	}
+	return ""
+}
+
+// DetectMTP reports Hugging Face Discover signals for Multi-Token Prediction.
+// Returns "" (none), "mtp" (fused trunk / MTP GGUF), or "mtp-draft" (sidecar).
+// This is name/tag heuristics only — library rows use real GGUF nextn metadata.
+func DetectMTP(repoID string, tags []string, filePaths []string) string {
+	lowerID := strings.ToLower(strings.TrimSpace(repoID))
+	if mtpSidecarInPath(lowerID) {
+		return "mtp-draft"
+	}
+	for _, p := range filePaths {
+		base := strings.ToLower(filepath.Base(p))
+		if strings.HasPrefix(base, "mtp-") {
+			return "mtp-draft"
+		}
+	}
+	for _, t := range tags {
+		lt := strings.ToLower(strings.TrimSpace(t))
+		if lt == "mtp-draft" || lt == "draft-mtp" || lt == "mtp-sidecar" {
+			return "mtp-draft"
+		}
+	}
+	if hasFusedMTPHint(lowerID, tags, filePaths) {
+		return "mtp"
+	}
+	return ""
+}
+
+func mtpSidecarInPath(lower string) bool {
+	if strings.Contains(lower, "/mtp-") {
+		return true
+	}
+	// Repo name itself is an mtp- sidecar package: author/mtp-....
+	if _, name, ok := strings.Cut(lower, "/"); ok && strings.HasPrefix(name, "mtp-") {
+		return true
+	}
+	if !strings.Contains(lower, "/") && strings.HasPrefix(lower, "mtp-") {
+		return true
+	}
+	return false
+}
+
+func hasFusedMTPHint(lowerID string, tags []string, filePaths []string) bool {
+	if containsMTPToken(lowerID) {
+		return true
+	}
+	for _, t := range tags {
+		lt := strings.ToLower(strings.TrimSpace(t))
+		if lt == "mtp" || lt == "multi-token-prediction" || lt == "multi_token_prediction" {
+			return true
+		}
+	}
+	for _, p := range filePaths {
+		base := strings.ToLower(filepath.Base(p))
+		if strings.HasPrefix(base, "mtp-") {
+			continue // sidecar file, not fused trunk hint alone
+		}
+		if containsMTPToken(base) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsMTPToken reports whether s has MTP as a delimited token
+// (e.g. -MTP-, _MTP_, -mtp.gguf) rather than an accidental substring.
+func containsMTPToken(s string) bool {
+	s = strings.ToLower(s)
+	for i := 0; i+3 <= len(s); i++ {
+		if s[i:i+3] != "mtp" {
+			continue
+		}
+		leftOK := i == 0 || !isASCIIAlnum(s[i-1])
+		rightOK := i+3 == len(s) || !isASCIIAlnum(s[i+3])
+		if leftOK && rightOK {
 			return true
 		}
 	}

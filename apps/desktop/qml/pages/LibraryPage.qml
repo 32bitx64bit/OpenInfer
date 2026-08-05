@@ -22,15 +22,14 @@ Item {
     function modalityTag(m) {
         if (!m) return ""
         var meta = m.metadata || {}
+        // MTP capability is a separate tag (mtpTag); keep this for vision/audio
+        // and non-MTP speculative draft sidecars (eagle3 / dflash / …).
         if (meta.speculative_draft) {
-            if (meta.spec_type === "draft-mtp" || meta.has_mtp) return "mtp draft"
+            if (meta.spec_type === "draft-mtp" || meta.has_mtp) return ""
             if (meta.spec_type) return String(meta.spec_type).replace("draft-", "") + " draft"
             return "draft"
         }
-        if (m.projector_path === "") {
-            if (meta.has_mtp) return "mtp"
-            return ""
-        }
+        if (!m.projector_path) return ""
         var hasA = !!meta.has_audio
         var hasV = !!meta.has_vision
         if (page.experimentalAudio) {
@@ -41,6 +40,16 @@ Item {
         }
         // Setting off: keep historical "vision" label for any projector pair.
         return "vision"
+    }
+
+    // GGUF NextN / MTP heads (metadata.has_mtp). Distinct from modality.
+    function mtpTag(m) {
+        if (!m || !m.metadata) return ""
+        var meta = m.metadata
+        if (meta.speculative_draft && (meta.spec_type === "draft-mtp" || meta.has_mtp))
+            return "MTP draft"
+        if (meta.has_mtp) return "MTP"
+        return ""
     }
 
     signal openDetail(string modelId)
@@ -91,9 +100,16 @@ Item {
     function filteredModels() {
         var f = page.filter.toLowerCase()
         return page.models.filter(function(m) {
-            return f === "" || m.alias.toLowerCase().indexOf(f) >= 0
-                || m.quantization.toLowerCase().indexOf(f) >= 0
-                || m.architecture.toLowerCase().indexOf(f) >= 0
+            if (f === "") return true
+            if (m.alias.toLowerCase().indexOf(f) >= 0) return true
+            if (m.quantization.toLowerCase().indexOf(f) >= 0) return true
+            if (m.architecture.toLowerCase().indexOf(f) >= 0) return true
+            var mt = page.mtpTag(m).toLowerCase()
+            if (mt !== "" && mt.indexOf(f) >= 0) return true
+            if (f === "mtp" && m.metadata && m.metadata.has_mtp) return true
+            var mod = page.modalityTag(m).toLowerCase()
+            if (mod !== "" && mod.indexOf(f) >= 0) return true
+            return false
         })
     }
 
@@ -189,6 +205,16 @@ Item {
                                 }
                                 Tag { visible: modelData.quantization !== ""; text: modelData.quantization; tone: AppTheme.info }
                                 Tag { visible: modelData.architecture !== ""; text: modelData.architecture; tone: AppTheme.accent }
+                                Tag {
+                                    visible: page.mtpTag(modelData) !== ""
+                                    text: page.mtpTag(modelData)
+                                    tone: AppTheme.warning
+                                    ToolTip.visible: mtpHover.hovered
+                                    ToolTip.text: modelData.metadata && modelData.metadata.speculative_draft
+                                        ? "Speculative MTP draft sidecar (not a chat model)."
+                                        : "GGUF includes NextN / Multi-Token Prediction heads."
+                                    HoverHandler { id: mtpHover }
+                                }
                                 Tag {
                                     visible: page.modalityTag(modelData) !== ""
                                     text: page.modalityTag(modelData); tone: AppTheme.success

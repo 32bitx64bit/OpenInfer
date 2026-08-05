@@ -17,6 +17,7 @@ Item {
     property var detailGroups: []
     property var detailProjectors: []
     property var detailModalities: []
+    property string detailMTP: ""
     property bool withVision: true
     property bool detailLoading: false
     property bool hasToken: false
@@ -28,6 +29,12 @@ Item {
         if (a && v) return "audio+vision"
         if (a) return "audio"
         if (v) return "vision"
+        return ""
+    }
+
+    function mtpLabel(kind) {
+        if (kind === "mtp-draft") return "MTP draft"
+        if (kind === "mtp") return "MTP"
         return ""
     }
 
@@ -76,6 +83,7 @@ Item {
         page.detailLoading = true
         page.detail = null
         page.detailModalities = []
+        page.detailMTP = ""
         page.withVision = true
         detailDialog.open()
         api.get("/api/v1/hf/repo/" + repoId, function(st, data) {
@@ -85,6 +93,7 @@ Item {
                 page.detailGroups = data.groups || []
                 page.detailProjectors = data.projectors || []
                 page.detailModalities = data.modalities || []
+                page.detailMTP = data.mtp || ""
             } else {
                 page.searchError = (data && (data.detail || data.error)) || ("HTTP " + st)
                 detailDialog.close()
@@ -196,12 +205,19 @@ Item {
                         RowLayout {
                             Text { text: modelData.id; color: AppTheme.text; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
                             Tag {
+                                visible: page.mtpLabel(modelData.mtp) !== ""
+                                text: page.mtpLabel(modelData.mtp)
+                                tone: AppTheme.warning
+                                Layout.minimumWidth: implicitWidth
+                            }
+                            Tag {
                                 visible: page.experimentalAudio && page.modalityLabel(modelData.modalities) !== ""
                                 text: page.modalityLabel(modelData.modalities)
                                 tone: AppTheme.success
+                                Layout.minimumWidth: implicitWidth
                             }
-                            Tag { visible: modelData.gated !== false && modelData.gated !== null; text: "gated"; tone: AppTheme.warning }
-                            Tag { visible: modelData.private; text: "private"; tone: AppTheme.danger }
+                            Tag { visible: modelData.gated !== false && modelData.gated !== null; text: "gated"; tone: AppTheme.warning; Layout.minimumWidth: implicitWidth }
+                            Tag { visible: modelData.private; text: "private"; tone: AppTheme.danger; Layout.minimumWidth: implicitWidth }
                         }
                         RowLayout {
                             spacing: 12
@@ -252,6 +268,12 @@ Item {
                         font.weight: Font.DemiBold
                         color: AppTheme.text
                         elide: Text.ElideMiddle
+                    }
+                    Tag {
+                        visible: page.mtpLabel(page.detailMTP) !== ""
+                        text: page.mtpLabel(page.detailMTP)
+                        tone: AppTheme.warning
+                        Layout.minimumWidth: implicitWidth
                     }
                     Button {
                         text: "Open in browser"
@@ -343,11 +365,18 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label { text: modelData.label; color: AppTheme.text; font.weight: Font.DemiBold }
-                                    Tag { visible: modelData.split; text: modelData.parts + " parts"; tone: AppTheme.info }
+                                    Tag { visible: modelData.split; text: modelData.parts + " parts"; tone: AppTheme.info; Layout.minimumWidth: implicitWidth }
+                                    Tag {
+                                        visible: page.mtpLabel(modelData.mtp) !== ""
+                                        text: page.mtpLabel(modelData.mtp)
+                                        tone: AppTheme.warning
+                                        Layout.minimumWidth: implicitWidth
+                                    }
                                     Tag {
                                         visible: page.groupModalityTag(modelData) !== ""
                                         text: page.groupModalityTag(modelData)
                                         tone: AppTheme.success
+                                        Layout.minimumWidth: implicitWidth
                                     }
                                     Item { Layout.fillWidth: true }
                                     Label {

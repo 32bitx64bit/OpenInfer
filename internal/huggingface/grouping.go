@@ -28,11 +28,12 @@ type GroupedFile struct {
 // set, or a vision set. Sets are only offered whole — never per-shard.
 type FileGroup struct {
 	ID          string        `json:"id"`    // stable, derived from base name + quant
-	Label       string        `json:"label"` // e.g. "Q4_K_M" or "IQ4_XS split set"
+	Label       string        `json:"label"` // e.g. "Q4_K_M" or "IQ4_XS · MTP"
 	Quant       string        `json:"quant"`
 	Split       bool          `json:"split"`
 	Parts       int           `json:"parts"`
-	Vision      bool          `json:"vision"` // includes an mmproj file
+	Vision      bool          `json:"vision"`        // includes an mmproj file
+	MTP         string        `json:"mtp,omitempty"` // "" | "mtp" | "mtp-draft"
 	TotalBytes  int64         `json:"total_bytes"`
 	Files       []GroupedFile `json:"files"`
 	EstMemBytes int64         `json:"est_memory_bytes"` // rough estimate, clearly marked
@@ -71,11 +72,13 @@ func quantOf(path string) string {
 
 // GroupFiles organizes repository files into logical download units:
 // split shards are merged into one set, and non-GGUF files are excluded.
+// Non-split GGUFs are one group per file so mixed MTP / non-MTP quants in the
+// same repo (same quant token, different filenames) stay distinct.
 // Projector (mmproj) files are returned separately: the UI offers a single
 // "include vision" toggle that appends them to whichever group is chosen,
 // instead of duplicating every quant as a separate vision variant.
 func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile) {
-	type key struct{ base, quant string }
+	type key struct{ stem, quant, mtp string }
 	regular := map[key][]GroupedFile{}
 	splits := map[key][]GroupedFile{}
 	splitDeclared := map[key]int{} // declared shard count from filename
@@ -86,11 +89,8 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 		if kind == KindOther {
 			continue
 		}
-		base := f.Path
-		if i := strings.LastIndex(base, "/"); i >= 0 {
-			base = base[:i]
-		}
 		q := quantOf(f.Path)
+		mtp := FileMTP(f.Path)
 		gf := GroupedFile{Path: f.Path, Size: f.Size, Kind: string(kind)}
 		if kind == KindProjector {
 			projByQuant[q] = append(projByQuant[q], gf)
@@ -100,24 +100,30 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 			part, _ := strconv.Atoi(m[1])
 			declared, _ := strconv.Atoi(m[2])
 			gf.Part = part
-			k := key{base: splitStem(f.Path), quant: q}
+			k := key{stem: splitStem(f.Path), quant: q, mtp: mtp}
 			splits[k] = append(splits[k], gf)
 			if declared > splitDeclared[k] {
 				splitDeclared[k] = declared
 			}
 			continue
 		}
-		k := key{base: base, quant: q}
+		// One group per non-split GGUF. Key includes the full relative path so
+		// identical basenames in different folders stay separate, and so MTP /
+		// non-MTP siblings that share a quant never merge.
+		k := key{stem: strings.TrimSuffix(f.Path, ".gguf"), quant: q, mtp: mtp}
 		regular[k] = append(regular[k], gf)
 	}
 
 	groups = []FileGroup{}
 	seenID := map[string]int{}
 
-	uniqID := func(stem, quant string) string {
+	uniqID := func(stem, quant, mtp string) string {
 		id := strings.ToLower(strings.NewReplacer("/", "-", " ", "-", ".", "-").Replace(stem))
 		if quant != "" {
 			id += "-" + strings.ToLower(quant)
+		}
+		if mtp != "" {
+			id += "-" + mtp
 		}
 		if n := seenID[id]; n > 0 {
 			seenID[id] = n + 1
@@ -129,9 +135,10 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 
 	for k, fs := range regular {
 		g := FileGroup{
-			ID:    uniqID(stemOf(fs[0].Path), k.quant),
-			Label: orDefault(k.quant, "GGUF"),
+			ID:    uniqID(k.stem, k.quant, k.mtp),
+			Label: quantLabel(k.quant, k.mtp, fs[0].Path),
 			Quant: k.quant,
+			MTP:   k.mtp,
 			Files: sortedFiles(fs),
 		}
 		for _, f := range fs {
@@ -149,9 +156,10 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 			total += f.Size
 		}
 		g := FileGroup{
-			ID:         uniqID(splitStem(fs[0].Path), k.quant),
-			Label:      orDefault(k.quant, "GGUF") + " split set",
+			ID:         uniqID(k.stem, k.quant, k.mtp),
+			Label:      quantLabel(k.quant, k.mtp, fs[0].Path) + " split set",
 			Quant:      k.quant,
+			MTP:        k.mtp,
 			Split:      true,
 			Parts:      parts,
 			Files:      sortedFiles(fs),
@@ -169,7 +177,7 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 	if len(allProjectors) > 0 && len(groups) == 0 {
 		// Projector-only repository corner case: offer the set directly and
 		// suppress the separate return so it is not added twice.
-		g := FileGroup{ID: uniqID("projectors", ""), Label: "Projector files", Vision: true, Files: sortedFiles(allProjectors)}
+		g := FileGroup{ID: uniqID("projectors", "", ""), Label: "Projector files", Vision: true, Files: sortedFiles(allProjectors)}
 		for _, f := range allProjectors {
 			g.TotalBytes += f.Size
 		}
@@ -183,18 +191,57 @@ func GroupFiles(files []FileEntry) (groups []FileGroup, projectors []GroupedFile
 	}
 
 	// Sort by quantization rank: smallest/heaviest-compressed quants first,
-	// full-precision last. Unknown quants fall back to file size.
+	// full-precision last. Within a quant, plain before MTP, then by size.
 	sort.SliceStable(groups, func(a, b int) bool {
 		ra, rb := quantRank(groups[a]), quantRank(groups[b])
 		if ra != rb {
 			return ra < rb
 		}
+		if groups[a].Quant == groups[b].Quant && groups[a].MTP != groups[b].MTP {
+			return groups[a].MTP < groups[b].MTP
+		}
 		if groups[a].TotalBytes != groups[b].TotalBytes {
 			return groups[a].TotalBytes < groups[b].TotalBytes
 		}
-		return groups[a].Vision && !groups[b].Vision
+		return groups[a].Label < groups[b].Label
 	})
 	return groups, sortedFiles(allProjectors)
+}
+
+// quantLabel builds the Discover download-row title for a quant (+ MTP).
+func quantLabel(quant, mtp, path string) string {
+	label := orDefault(quant, "GGUF")
+	if hint := mtpVariantHint(path); hint != "" && mtp == "mtp" {
+		label += " · " + hint
+	}
+	switch mtp {
+	case "mtp":
+		label += " · MTP"
+	case "mtp-draft":
+		label += " · MTP draft"
+	}
+	return label
+}
+
+// mtpVariantHint pulls a short build tag immediately before MTP in the
+// filename (e.g. AMD / LOW in …-AMD-MTP-IQ4_XS), so same-quant MTP builds
+// stay distinguishable in the UI.
+func mtpVariantHint(path string) string {
+	base := strings.ToUpper(stemOf(path))
+	parts := strings.FieldsFunc(base, func(r rune) bool {
+		return r == '-' || r == '_'
+	})
+	for i, p := range parts {
+		if p != "MTP" || i == 0 {
+			continue
+		}
+		prev := parts[i-1]
+		switch prev {
+		case "AMD", "LOW", "HIGH", "ULTRA", "FAST", "SPARSE", "DENSE":
+			return prev
+		}
+	}
+	return ""
 }
 
 // Known quantization sort order (smallest → largest).

@@ -53,6 +53,34 @@ func TestDetectModalities(t *testing.T) {
 	}
 }
 
+func TestDetectMTP(t *testing.T) {
+	cases := []struct {
+		id    string
+		tags  []string
+		files []string
+		want  string
+	}{
+		// Fused trunk MTP GGUF (DavidAU-style).
+		{"DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF",
+			[]string{"gguf"}, nil, "mtp"},
+		{"unsloth/Qwen3.6-27B-MTP-GGUF", []string{"gguf"}, nil, "mtp"},
+		{"someone/Qwen3.5-4B-MTP-IQ4_XS.gguf", nil,
+			[]string{"Qwen3.5-4B-MTP-IQ4_XS.gguf"}, "mtp"},
+		{"org/model", []string{"mtp", "gguf"}, nil, "mtp"},
+		// Sidecar draft packages.
+		{"someone/mtp-Qwen3.6-27B-GGUF", []string{"gguf"}, nil, "mtp-draft"},
+		{"org/repo", nil, []string{"mtp-Qwen3.6-27B-Q4_K_M.gguf"}, "mtp-draft"},
+		// Non-MTP.
+		{"bartowski/Llama-3.2-3B-Instruct-GGUF", []string{"gguf"}, nil, ""},
+		{"z-lab/Qwen3-4B-DFlash-GGUF", []string{"gguf", "speculative-decoding"}, nil, ""},
+	}
+	for _, tc := range cases {
+		if got := DetectMTP(tc.id, tc.tags, tc.files); got != tc.want {
+			t.Errorf("DetectMTP(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestModalityLabel(t *testing.T) {
 	if ModalityLabel([]string{"audio"}) != "audio" {
 		t.Fatal("audio")

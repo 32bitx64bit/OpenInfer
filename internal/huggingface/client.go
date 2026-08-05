@@ -118,6 +118,7 @@ type SearchResult struct {
 	Gated       any       `json:"gated"` // false | "auto" | "manual"
 	PipelineTag string    `json:"pipeline_tag,omitempty"`
 	Modalities  []string  `json:"modalities,omitempty"` // audio | vision
+	MTP         string    `json:"mtp,omitempty"`        // "" | "mtp" | "mtp-draft"
 }
 
 // hfModel mirrors the /api/models payload fields we use.
@@ -176,6 +177,7 @@ func (c *Client) Search(ctx context.Context, query, sort string, limit int) ([]S
 			Trending: m.TrendingScore, UpdatedAt: m.LastModified, Tags: m.Tags,
 			Private: m.Private, Gated: m.Gated, PipelineTag: m.PipelineTag,
 			Modalities: DetectModalities(m.ID, m.PipelineTag, m.Tags, files),
+			MTP:        DetectMTP(m.ID, m.Tags, files),
 		})
 	}
 	return out, nil

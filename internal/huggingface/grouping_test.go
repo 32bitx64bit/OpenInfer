@@ -1,6 +1,7 @@
 package huggingface
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -69,6 +70,59 @@ func TestGroupFilesProjectorOnlyRepo(t *testing.T) {
 	if len(projectors) != 0 {
 		t.Errorf("projectors already in the group must not be returned again: %+v", projectors)
 	}
+}
+
+func TestGroupFilesMixedMTPSameQuant(t *testing.T) {
+	// DavidAU-style: plain + MTP (+ AMD/LOW MTP) share a quant token.
+	files := []FileEntry{
+		{Path: "Qwen3.6-NEO-IQ4_XS.gguf", Size: 1000},
+		{Path: "Qwen3.6-NEO-MTP-IQ4_XS.gguf", Size: 1100},
+		{Path: "Qwen3.6-NEO-AMD-MTP-IQ4_XS.gguf", Size: 1200},
+		{Path: "Qwen3.6-NEO-LOW-MTP-IQ4_XS.gguf", Size: 1150},
+		{Path: "Qwen3.6-NEO-Q4_K_M.gguf", Size: 2000},
+		{Path: "Qwen3.6-NEO-MTP-Q4_K_M.gguf", Size: 2100},
+		{Path: "mmproj-F16.gguf", Size: 600},
+	}
+	groups, projectors := GroupFiles(files)
+	if len(projectors) != 1 {
+		t.Fatalf("projectors: %+v", projectors)
+	}
+	if len(groups) != 6 {
+		t.Fatalf("want 6 distinct groups (no quant merging across MTP), got %d: %+v", len(groups), labels(groups))
+	}
+	byQuantMTP := map[string]int{}
+	for _, g := range groups {
+		byQuantMTP[g.Quant+"|"+g.MTP]++
+		if g.Quant == "IQ4_XS" && g.MTP == "" && g.Label != "IQ4_XS" {
+			t.Errorf("plain IQ4_XS label = %q", g.Label)
+		}
+		if g.MTP == "mtp" && !strings.Contains(g.Label, "MTP") {
+			t.Errorf("MTP group label missing MTP: %q", g.Label)
+		}
+		if strings.Contains(g.Files[0].Path, "AMD-MTP") && !strings.Contains(g.Label, "AMD") {
+			t.Errorf("AMD MTP label = %q", g.Label)
+		}
+		if strings.Contains(g.Files[0].Path, "LOW-MTP") && !strings.Contains(g.Label, "LOW") {
+			t.Errorf("LOW MTP label = %q", g.Label)
+		}
+		if len(g.Files) != 1 {
+			t.Errorf("group %q should be a single file, got %d", g.Label, len(g.Files))
+		}
+	}
+	if byQuantMTP["IQ4_XS|"] != 1 || byQuantMTP["IQ4_XS|mtp"] != 3 {
+		t.Errorf("IQ4_XS split wrong: %v", byQuantMTP)
+	}
+	if byQuantMTP["Q4_K_M|"] != 1 || byQuantMTP["Q4_K_M|mtp"] != 1 {
+		t.Errorf("Q4_K_M split wrong: %v", byQuantMTP)
+	}
+}
+
+func labels(gs []FileGroup) []string {
+	out := make([]string, len(gs))
+	for i, g := range gs {
+		out[i] = g.Label
+	}
+	return out
 }
 
 func TestGroupFilesExcludesNonGGUF(t *testing.T) {

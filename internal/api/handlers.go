@@ -144,6 +144,7 @@ func (h *handlers) hfRepo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"repo": info, "groups": groups, "projectors": projectors,
 		"modalities":    modalities,
+		"mtp":           huggingface.DetectMTP(info.ID, info.Tags, filePaths),
 		"download_base": h.d.Layout.Models,
 	})
 }
