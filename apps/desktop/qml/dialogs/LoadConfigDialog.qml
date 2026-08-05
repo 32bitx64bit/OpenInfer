@@ -74,7 +74,10 @@ Dialog {
         model = m
         modelId = m.id
         // Reassign the whole settings object so QML bindings refresh. Mutating
-        // keys in place does not notify TextFields still bound to the previous model.
+        // keys in place does not notify FormFields still bound to the previous model.
+        var meta = m.metadata || {}
+        // Fused-trunk MTP: default on; presets (Last known good) can still override.
+        var defaultMTP = !!(meta.has_mtp && !meta.speculative_draft)
         var next = {
             "context_length": 4096, "gpu_offload": "all", "gpu_layers": 0,
             "threads": 0, "flash_attention": "auto", "parallel": 0,
@@ -88,10 +91,14 @@ Dialog {
             "swa_full": false, "fit": "", "no_warmup": false,
             "rope_scaling": "", "alias": m.alias || "", "raw_args": "",
             "jinja": root.isMultimodal(m), "no_mmproj": false, "no_mmproj_offload": false,
-            "draft_model": "", "draft_max": 0, "draft_min": 0, "spec_type": "",
+            "draft_model": "",
+            "draft_max": defaultMTP ? 2 : 0,
+            "draft_min": 0,
+            "spec_type": defaultMTP ? "draft-mtp" : "",
             "runtime_id": m.pinned_runtime || "",
             "save_on_success": true
         }
+
         settings = next
         if (aliasField) aliasField.text = next.alias
         selectedRuntime = next.runtime_id
@@ -617,7 +624,7 @@ Dialog {
                     Layout.fillWidth: true
                     visible: root.hasMTP
                     label: "Built-in MTP"
-                    hint: "This GGUF includes NextN / Multi-Token Prediction heads. Enable draft-mtp without a separate draft file (llama.cpp --spec-type draft-mtp)."
+                    hint: "Enabled by default for this GGUF (NextN / Multi-Token Prediction heads). Uses --spec-type draft-mtp without a separate draft file. Turn off here if you prefer single-token decode."
                     argName: "--spec-type"
                     Switch {
                         checked: root.settings.spec_type === "draft-mtp" && !root.settings.draft_model
@@ -625,6 +632,8 @@ Dialog {
                             if (checked) {
                                 root.setSetting("draft_model", "")
                                 root.setSetting("spec_type", "draft-mtp")
+                                if (!root.settings.draft_max)
+                                    root.setSetting("draft_max", 2)
                             } else if (root.settings.spec_type === "draft-mtp") {
                                 root.setSetting("spec_type", "")
                             }

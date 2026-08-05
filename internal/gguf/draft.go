@@ -123,15 +123,18 @@ func NextnPredictLayers(arch string, raw map[string]any) uint32 {
 
 // HasNextnTensors reports NextN/MTP tensor-family keys in metadata (rare) or
 // well-known nextn.* parameter keys some converters emit alongside tensors.
+// nextn_predict_layers is intentionally excluded — use NextnPredictLayers so a
+// value of 0 (MTP disabled) does not flip HasMTP.
 func HasNextnTensors(raw map[string]any) bool {
 	if raw == nil {
 		return false
 	}
 	for k := range raw {
 		lk := strings.ToLower(k)
-		if strings.HasPrefix(lk, "nextn.") ||
-			strings.Contains(lk, ".nextn.") ||
-			strings.HasSuffix(lk, ".nextn_predict_layers") {
+		if strings.HasSuffix(lk, ".nextn_predict_layers") || lk == "nextn_predict_layers" {
+			continue
+		}
+		if strings.HasPrefix(lk, "nextn.") || strings.Contains(lk, ".nextn.") {
 			return true
 		}
 	}

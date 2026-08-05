@@ -2,6 +2,47 @@ package gguf
 
 import "testing"
 
+func TestNextnPredictLayersJSONFloat(t *testing.T) {
+	// Metadata Raw re-hydrated from JSON uses float64 for numbers.
+	n := NextnPredictLayers("qwen35", map[string]any{
+		"qwen35.nextn_predict_layers": float64(1),
+	})
+	if n != 1 {
+		t.Fatalf("float64 nextn: got %d", n)
+	}
+	md := &Metadata{
+		Architecture: "qwen35",
+		Name:         "Qwen3.6-27B-MTP",
+		Raw: map[string]any{
+			"qwen35.nextn_predict_layers": float64(1),
+		},
+	}
+	md.ApplySpeculativeFlags("/models/Qwen3.6-27B-MTP-IQ4_XS.gguf")
+	if md.SpeculativeDraft {
+		t.Fatal("fused MTP trunk must not be speculative_draft")
+	}
+	if !md.HasMTP || md.NextnPredictLayers != 1 {
+		t.Fatalf("expected HasMTP from float64 KV: %+v", md)
+	}
+}
+
+func TestNextnPredictLayersZeroIsFalsy(t *testing.T) {
+	n := NextnPredictLayers("qwen35", map[string]any{
+		"qwen35.nextn_predict_layers": uint32(0),
+	})
+	if n != 0 {
+		t.Fatalf("got %d", n)
+	}
+	md := &Metadata{
+		Architecture: "qwen35",
+		Raw:          map[string]any{"qwen35.nextn_predict_layers": uint32(0)},
+	}
+	md.ApplySpeculativeFlags("/m.gguf")
+	if md.HasMTP {
+		t.Fatal("nextn=0 must not set HasMTP")
+	}
+}
+
 func TestSidecarPrefixes(t *testing.T) {
 	cases := map[string]SpecType{
 		"mtp-Qwen3.6-27B-Q4_K_M.gguf":      SpecMTP,

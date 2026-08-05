@@ -69,6 +69,9 @@ else
   ICON_DST="$APPDIR/usr/share/icons/hicolor/256x256/apps/openinfer-studio.svg"
 fi
 
+# StartupWMClass must match the window's X11 WM_CLASS / Wayland app_id so
+# Plasma (and other DEs) group the running window with the pinned launcher.
+# Without it, pinning from the app menu creates a second taskbar entry.
 cat > "$APPDIR/usr/share/applications/openinfer-studio.desktop" <<EOF
 [Desktop Entry]
 Name=OpenInfer Studio
@@ -78,6 +81,7 @@ Icon=openinfer-studio
 Type=Application
 Categories=Development;Utility;
 Terminal=false
+StartupWMClass=openinfer-studio
 EOF
 
 cat > "$APPDIR/AppRun" <<'EOF'

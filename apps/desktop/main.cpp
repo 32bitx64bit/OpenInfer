@@ -78,6 +78,10 @@ int main(int argc, char *argv[])
     QGuiApplication::setApplicationDisplayName(QStringLiteral("OpenInfer Studio"));
     QGuiApplication::setOrganizationName(QStringLiteral("OpenInfer"));
     QGuiApplication::setApplicationVersion(QStringLiteral(OPENINFER_VERSION));
+    // Ties the window to openinfer-studio.desktop (X11 WM_CLASS / Wayland
+    // app_id). Required for taskbar pinning to match the running window on
+    // KDE/GNOME; must stay in sync with StartupWMClass in the .desktop file.
+    QGuiApplication::setDesktopFileName(QStringLiteral("openinfer-studio"));
 
     // Native styles (macOS/Windows) and Plasma's org.kde.breeze reject or
     // mishandle control customization used throughout the QML UI. Force Fusion

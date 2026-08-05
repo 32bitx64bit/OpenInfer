@@ -155,6 +155,28 @@ func TestSpecTypeMTPWithoutDraft(t *testing.T) {
 	}
 }
 
+func TestSpecTypeMTPWithDraftMax(t *testing.T) {
+	// Matches LoadConfigDialog default for fused has_mtp trunks.
+	s := DefaultSettings()
+	s.SpecType = "draft-mtp"
+	s.DraftMax = 2
+	br := BuildArgs(s, "/m.gguf", "", newCaps, newHelp, "127.0.0.1", 1, "k")
+	if got := argVal(t, br.Args, "--spec-type"); got != "draft-mtp" {
+		t.Errorf("spec-type = %q", got)
+	}
+	gotMax := argVal(t, br.Args, "--spec-draft-n-max")
+	if gotMax == "" {
+		gotMax = argVal(t, br.Args, "--draft-max")
+	}
+	if gotMax != "2" {
+		t.Errorf("draft_max=2 → --spec-draft-n-max/--draft-max 2, got %q in %v", gotMax, br.Args)
+	}
+	joined := strings.Join(br.Args, " ")
+	if strings.Contains(joined, "--model-draft") || strings.Contains(joined, "--spec-draft-model") {
+		t.Errorf("fused mtp must not invent a draft path: %q", joined)
+	}
+}
+
 func TestParallelWarnWithDraft(t *testing.T) {
 	s := DefaultSettings()
 	s.DraftModel = "/draft.gguf"

@@ -545,6 +545,10 @@ func toUint32(v any) (uint32, bool) {
 		if n <= math.MaxUint32 {
 			return uint32(n), true
 		}
+	case int64:
+		if n >= 0 && uint64(n) <= math.MaxUint32 {
+			return uint32(n), true
+		}
 	case int32:
 		if n >= 0 {
 			return uint32(n), true
@@ -557,6 +561,15 @@ func toUint32(v any) (uint32, bool) {
 		return uint32(n), true
 	case uint8:
 		return uint32(n), true
+	case float64:
+		// JSON-unmarshaled numbers land as float64.
+		if n >= 0 && n <= float64(math.MaxUint32) && n == math.Trunc(n) {
+			return uint32(n), true
+		}
+	case float32:
+		if n >= 0 && n <= float32(math.MaxUint32) && float64(n) == math.Trunc(float64(n)) {
+			return uint32(n), true
+		}
 	}
 	return 0, false
 }
