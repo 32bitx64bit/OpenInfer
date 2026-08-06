@@ -17,6 +17,16 @@ ApplicationWindow {
     visible: true
     color: AppTheme.bg
 
+    Component.onCompleted: {
+        AppTheme.applyPalette(window)
+        window.reloadAll()
+    }
+    Connections {
+        target: AppTheme
+        function onModeChanged() { AppTheme.applyPalette(window) }
+        function onDarkChanged() { AppTheme.applyPalette(window) }
+    }
+
     Api { id: api }
     Events {
         id: events
@@ -29,6 +39,8 @@ ApplicationWindow {
                 break
             case "download.state_changed":
                 window.refreshDownloadsBadge()
+                if (payload.state === "complete")
+                    window.toast((payload.label || "Download") + " is ready in your library", "success")
                 break
             case "download.progress":
                 // DownloadsPage handles live progress; badge only needs state changes.
@@ -51,6 +63,23 @@ ApplicationWindow {
     property bool experimentalAudioModels: false
     property bool onboardingCompleted: true
     property bool onboardingPrompted: false
+    property string currentRoute: "chat"
+    property string previousRoute: "library"
+
+    function routeIndex(route) {
+        var routes = ["chat", "models", "library", "developer", "runtimes",
+                      "downloads", "logs", "settings", "model-detail"]
+        return routes.indexOf(route)
+    }
+    function goTo(route) {
+        if (route === "model-detail") previousRoute = currentRoute
+        if (route !== "model-detail" && currentRoute === "model-detail")
+            previousRoute = route
+        currentRoute = route
+    }
+    function goBack() {
+        goTo(previousRoute || "library")
+    }
 
     function refreshSettings() {
         api.get("/api/v1/settings", function(st, data) {
@@ -125,10 +154,10 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // Header bar
+        // Calm global bar: app identity on the left, activity on the right.
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 52
+            Layout.preferredHeight: 56
             color: AppTheme.bgAlt
             border.color: AppTheme.border
 
@@ -138,64 +167,50 @@ ApplicationWindow {
                 anchors.rightMargin: AppTheme.pad
                 spacing: AppTheme.gap
 
-                Text {
-                    text: "OpenInfer Studio"
-                    color: AppTheme.text
-                    font.pixelSize: AppTheme.fontTitle
-                    font.weight: Font.DemiBold
+                Column {
+                    spacing: 1
+                    Text {
+                        text: "OpenInfer Studio"
+                        color: AppTheme.text
+                        font.pixelSize: AppTheme.fontTitle
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        text: "Local inference, made practical"
+                        color: AppTheme.textFaint
+                        font.pixelSize: AppTheme.fontSmall
+                    }
                 }
-                Text {
-                    text: "local GGUF inference"
-                    color: AppTheme.textFaint
-                    font.pixelSize: AppTheme.fontSmall
-                }
-
                 Item { Layout.fillWidth: true }
 
-                // Loaded-model chips
-                Repeater {
-                    model: window.instances
-                    delegate: Row {
-                        spacing: 6
-                        StatusDot { state: modelData.state; anchors.verticalCenter: parent.verticalCenter }
-                        Text {
-                            text: modelData.model_alias || modelData.model_id
-                            color: AppTheme.textDim
-                            font.pixelSize: AppTheme.fontSmall
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            visible: modelData.state === "failed" || modelData.state === "crashed"
-                            text: "⚠"
-                            color: AppTheme.danger
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                // Keep operational context available without turning the header
+                // into a permanent status dashboard.
+                RowLayout {
+                    visible: window.instances.length > 0
+                    spacing: 6
+                    Text {
+                        text: window.instances.filter(function(i) {
+                            return ["ready", "busy", "loading", "starting"].indexOf(i.state) >= 0
+                        }).length + " active model" + (window.instances.length === 1 ? "" : "s")
+                        color: AppTheme.textDim
+                        font.pixelSize: AppTheme.fontSmall
+                    }
+                    Rectangle {
+                        width: 7; height: 7; radius: 4
+                        color: window.instances.some(function(i) { return i.state === "busy" })
+                            ? AppTheme.success : AppTheme.info
                     }
                 }
-
-                Rectangle { Layout.preferredWidth: 1; Layout.preferredHeight: 24; color: AppTheme.border; visible: hwSummary.text !== "" }
-
-                Text {
-                    id: hwSummary
-                    color: AppTheme.textDim
-                    font.pixelSize: AppTheme.fontSmall
-                    text: {
-                        if (!window.hardware) return ""
-                        var hw = window.hardware
-                        var gpus = (hw.gpus || []).map(function(g) { return g.name }).join(", ")
-                        return hw.cpu_model + "  ·  " + AppTheme.bytes(hw.ram_total) + " RAM"
-                            + (gpus ? "  ·  " + gpus : "")
-                    }
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 480
+                AppButton {
+                    text: window.downloadCount > 0 ? "Downloads · " + window.downloadCount : "Activity"
+                    primary: window.downloadCount > 0
+                    onClicked: window.goTo("downloads")
                 }
-
-                // Offline indicator
                 Row {
                     visible: api.lastError !== "" && !events.connected
                     spacing: 6
                     Rectangle { width: 8; height: 8; radius: 4; color: AppTheme.danger; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: "backend offline"; color: AppTheme.danger; font.pixelSize: AppTheme.fontSmall }
+                    Text { text: "Backend offline"; color: AppTheme.danger; font.pixelSize: AppTheme.fontSmall }
                 }
             }
         }
@@ -205,52 +220,67 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 0
 
-            // Navigation rail
+            // Navigation is task-oriented. Operational pages stay available in
+            // the secondary group without competing with the everyday flow.
             Rectangle {
                 Layout.fillHeight: true
-                Layout.preferredWidth: 180
+                Layout.preferredWidth: window.width < 1060 ? 64 : 196
                 color: AppTheme.bgAlt
                 border.color: AppTheme.border
 
-                Column {
+                ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 8
-                    spacing: 2
+                    spacing: 4
                     Repeater {
                         model: [
-                            { "label": "Chat", "glyph": "◎" },
-                            { "label": "Discover", "glyph": "⌕" },
-                            { "label": "Library", "glyph": "▤" },
-                            { "label": "Developer", "glyph": "⌘" },
-                            { "label": "Runtimes", "glyph": "⚙" },
-                            { "label": "Downloads", "glyph": "↓" },
-                            { "label": "Logs", "glyph": "☰" },
-                            { "label": "Settings", "glyph": "✦" }
+                            { "label": "Chat", "route": "chat", "glyph": "◌" },
+                            { "label": "Browse models", "route": "models", "glyph": "⌕" },
+                            { "label": "My library", "route": "library", "glyph": "▦" }
                         ]
                         delegate: NavButton {
                             text: modelData.label
                             glyph: modelData.glyph
-                            current: stack.currentIndex === index
-                                || (stack.currentIndex === 8 && modelData.label === "Library")
-                            onClicked: stack.currentIndex = index
-                            Rectangle {
-                                visible: modelData.label === "Downloads" && window.downloadCount > 0
-                                width: badgeText.implicitWidth + 12
-                                height: 18
-                                radius: 9
-                                color: AppTheme.accent
-                                anchors.right: parent.right
-                                anchors.rightMargin: 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                Text {
-                                    id: badgeText
-                                    anchors.centerIn: parent
-                                    text: window.downloadCount
-                                    font.pixelSize: AppTheme.fontSmall
-                                    color: AppTheme.onAccent
-                                }
-                            }
+                            compact: window.width < 1060
+                            current: window.currentRoute === modelData.route
+                                || (window.currentRoute === "model-detail" && modelData.route === "library")
+                            onClicked: window.goTo(modelData.route)
                         }
+                    }
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: AppTheme.border; Layout.topMargin: 8 }
+                    Label {
+                        visible: window.width >= 1060
+                        text: "TOOLS"
+                        color: AppTheme.textFaint
+                        font.pixelSize: AppTheme.fontSmall
+                        font.weight: Font.DemiBold
+                        font.letterSpacing: 1
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.topMargin: 6
+                    }
+                    Repeater {
+                        model: [
+                            { "label": "Downloads", "route": "downloads", "glyph": "↓" },
+                            { "label": "Runtimes", "route": "runtimes", "glyph": "⚙" },
+                            { "label": "Developer API", "route": "developer", "glyph": "⌘" },
+                            { "label": "Logs", "route": "logs", "glyph": "≡" }
+                        ]
+                        delegate: NavButton {
+                            text: modelData.label
+                            glyph: modelData.glyph
+                            compact: window.width < 1060
+                            current: window.currentRoute === modelData.route
+                            onClicked: window.goTo(modelData.route)
+                        }
+                    }
+                    Item { Layout.fillHeight: true }
+                    NavButton {
+                        text: "Settings"
+                        glyph: "⚙"
+                        compact: window.width < 1060
+                        current: window.currentRoute === "settings"
+                        onClicked: window.goTo("settings")
                     }
                 }
             }
@@ -260,10 +290,35 @@ ApplicationWindow {
                 id: stack
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                currentIndex: window.routeIndex(window.currentRoute)
 
-                ChatPage      { api: api; events: events; experimentalAudio: window.experimentalAudioModels }
-                DiscoverPage  { api: api; events: events; experimentalAudio: window.experimentalAudioModels }
-                LibraryPage   { api: api; events: events; experimentalAudio: window.experimentalAudioModels; onOpenDetail: function(modelId) { window.openInstanceDetail(modelId) } }
+                ChatPage {
+                    api: api
+                    events: events
+                    experimentalAudio: window.experimentalAudioModels
+                    onOpenLibrary: window.goTo("library")
+                    onConfigureModel: function(modelId) {
+                        window.goTo("library")
+                        libraryPage.openLoad(modelId)
+                    }
+                }
+                DiscoverPage {
+                    api: api
+                    events: events
+                    experimentalAudio: window.experimentalAudioModels
+                    onDownloadQueued: function(label) {
+                        window.refreshDownloadsBadge()
+                        window.toast(label + " added to downloads", "success")
+                    }
+                }
+                LibraryPage {
+                    id: libraryPage
+                    api: api
+                    events: events
+                    experimentalAudio: window.experimentalAudioModels
+                    onOpenDetail: function(modelId) { window.openInstanceDetail(modelId) }
+                    onBrowseModels: window.goTo("models")
+                }
                 DeveloperPage { api: api; events: events }
                 RuntimesPage  { api: api; events: events; recommendation: window.recommendation }
                 DownloadsPage { api: api; events: events }
@@ -285,17 +340,17 @@ ApplicationWindow {
                     id: instanceDetailPage
                     api: api
                     events: events
-                    onBack: stack.currentIndex = 2
+                    onBack: window.goBack()
                 }
             }
         }
     }
 
-    // Instance detail is stack index 8, reached from the Library page.
+    // Detail pages are routed by name and retain the originating page for Back.
     function openInstanceDetail(modelId) {
         instanceDetailPage.modelId = modelId
         instanceDetailPage.enter()
-        stack.currentIndex = 8
+        goTo("model-detail")
     }
 
     // Toast overlay
@@ -334,8 +389,8 @@ ApplicationWindow {
         recommendation: window.recommendation
         stack: stack
         onFinished: window.onboardingCompleted = true
-        onGoChat: stack.currentIndex = 0
+        onGoChat: window.goTo("chat")
+        onGoRuntimes: window.goTo("runtimes")
+        onGoModels: window.goTo("models")
     }
-
-    Component.onCompleted: reloadAll()
 }

@@ -70,6 +70,59 @@ type GenParams struct {
 	ChatTemplateKwargs string   `json:"chat_template_kwargs,omitempty"`
 }
 
+// mergeGenParams applies explicit request settings over persisted conversation
+// settings. Pointer fields preserve an intentional zero value (for example
+// temperature 0) while omitted fields inherit the conversation default.
+func mergeGenParams(saved, overrides GenParams) GenParams {
+	out := saved
+	if overrides.Temperature != nil {
+		out.Temperature = overrides.Temperature
+	}
+	if overrides.TopP != nil {
+		out.TopP = overrides.TopP
+	}
+	if overrides.TopK != nil {
+		out.TopK = overrides.TopK
+	}
+	if overrides.MinP != nil {
+		out.MinP = overrides.MinP
+	}
+	if overrides.TypicalP != nil {
+		out.TypicalP = overrides.TypicalP
+	}
+	if overrides.RepeatPenalty != nil {
+		out.RepeatPenalty = overrides.RepeatPenalty
+	}
+	if overrides.RepeatLastN != nil {
+		out.RepeatLastN = overrides.RepeatLastN
+	}
+	if overrides.FrequencyPenalty != nil {
+		out.FrequencyPenalty = overrides.FrequencyPenalty
+	}
+	if overrides.PresencePenalty != nil {
+		out.PresencePenalty = overrides.PresencePenalty
+	}
+	if overrides.Seed != nil {
+		out.Seed = overrides.Seed
+	}
+	if overrides.MaxTokens != nil {
+		out.MaxTokens = overrides.MaxTokens
+	}
+	if overrides.Stop != nil {
+		out.Stop = overrides.Stop
+	}
+	if overrides.JSONSchema != "" {
+		out.JSONSchema = overrides.JSONSchema
+	}
+	if overrides.Grammar != "" {
+		out.Grammar = overrides.Grammar
+	}
+	if overrides.ChatTemplateKwargs != "" {
+		out.ChatTemplateKwargs = overrides.ChatTemplateKwargs
+	}
+	return out
+}
+
 // AudioInput is optional audio for a user turn (experimental llama.cpp path).
 type AudioInput struct {
 	Path   string `json:"path,omitempty"`   // local file from the desktop picker
@@ -324,6 +377,13 @@ func (s *Service) Generate(ctx context.Context, convID, parentID, userContent st
 	if err != nil {
 		return "", fmt.Errorf("conversation not found: %w", err)
 	}
+	var savedParams GenParams
+	if strings.TrimSpace(paramsJSON) != "" {
+		if err := json.Unmarshal([]byte(paramsJSON), &savedParams); err != nil {
+			return "", fmt.Errorf("invalid saved generation parameters: %w", err)
+		}
+	}
+	params = mergeGenParams(savedParams, params)
 
 	// Branch point: explicit parent (edit/regenerate) or latest leaf.
 	if parentID == "" && (userContent != "" || audio != nil) {

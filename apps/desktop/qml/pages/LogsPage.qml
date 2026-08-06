@@ -73,7 +73,7 @@ Item {
             Layout.margins: AppTheme.pad
             spacing: 8
             Label { text: "Log files"; font.pixelSize: AppTheme.fontTitle; font.weight: Font.DemiBold; color: AppTheme.text }
-            Button {
+            AppButton {
                 text: "Open log directory"
                 flat: true
                 onClicked: Qt.openUrlExternally("file://" + page.appLogDir)
@@ -104,8 +104,41 @@ Item {
             TabBar {
                 id: viewTabs
                 Layout.fillWidth: true
-                TabButton { text: "File view" }
-                TabButton { text: "Live stream" }
+                background: Rectangle {
+                    color: AppTheme.bgAlt
+                    radius: AppTheme.radiusSmall
+                    border.color: AppTheme.border
+                }
+                TabButton {
+                    text: "File view"
+                    width: implicitWidth + 24
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? AppTheme.accent : AppTheme.textDim
+                        font.weight: parent.checked ? Font.DemiBold : Font.Normal
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: parent.checked ? AppTheme.surfaceSelected : "transparent"
+                        radius: AppTheme.radiusSmall
+                    }
+                }
+                TabButton {
+                    text: "Live stream"
+                    width: implicitWidth + 24
+                    contentItem: Text {
+                        text: parent.text
+                        color: parent.checked ? AppTheme.accent : AppTheme.textDim
+                        font.weight: parent.checked ? Font.DemiBold : Font.Normal
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        color: parent.checked ? AppTheme.surfaceSelected : "transparent"
+                        radius: AppTheme.radiusSmall
+                    }
+                }
             }
 
             StackLayout {
@@ -117,7 +150,7 @@ Item {
                 ColumnLayout {
                     spacing: 8
                     RowLayout {
-                        Button {
+                        AppButton {
                             text: "Refresh"
                             enabled: page.selectedFile !== ""
                             onClicked: page.tail(page.selectedFile)
@@ -147,17 +180,17 @@ Item {
                     spacing: 8
                     RowLayout {
                         spacing: 8
-                        TextField {
+                        AppTextField {
                             Layout.fillWidth: true
                             placeholderText: "Filter text…"
                             onTextChanged: page.searchText = text
                         }
-                        ComboBox {
+                        AppComboBox {
                             model: ["", "ERROR", "WARN", "INFO", "DEBUG"]
                             onActivated: function(i) { page.levelFilter = model[i] }
                         }
-                        Button { text: page.paused ? "Resume" : "Pause"; onClicked: page.paused = !page.paused }
-                        Button { text: "Clear"; onClicked: page.live = [] }
+                        AppButton { text: page.paused ? "Resume" : "Pause"; onClicked: page.paused = !page.paused }
+                        AppButton { text: "Clear"; onClicked: page.live = [] }
                     }
                     ListView {
                         Layout.fillWidth: true

@@ -129,6 +129,11 @@ Item {
             width: page.width - AppTheme.pad * 2
             spacing: AppTheme.gap * 1.5
 
+            PageHeader {
+                title: "Developer API"
+                subtitle: "Expose loaded models through an OpenAI-compatible local endpoint. Configure this only when another app needs access."
+            }
+
             Card {
                 Layout.fillWidth: true
                 implicitHeight: srvCol.implicitHeight + 24
@@ -145,9 +150,9 @@ Item {
                             font.weight: Font.DemiBold
                         }
                         Item { Layout.fillWidth: true }
-                        Button {
+                        AppButton {
                             text: page.running ? "Stop" : "Start"
-                            highlighted: !page.running
+                            primary: !page.running
                             onClicked: page.api.post("/api/v1/server/" + (page.running ? "stop" : "start"), {},
                                 function(st, data) {
                                     if (st !== 200) page.errorText = (data && (data.detail || data.error)) || "failed"
@@ -165,7 +170,7 @@ Item {
                             color: AppTheme.accent
                             font.family: "monospace"
                         }
-                        Button {
+                        AppButton {
                             text: "Copy"
                             flat: true
                             onClicked: { clip.text = page.baseUrl() + "/v1"; clip.selectAll(); clip.copy() }
@@ -181,12 +186,12 @@ Item {
                             color: AppTheme.text
                             font.family: "monospace"
                         }
-                        Button { text: page.keyVisible ? "Hide" : "Reveal"; flat: true; onClicked: page.keyVisible = !page.keyVisible }
-                        Button {
+                        AppButton { text: page.keyVisible ? "Hide" : "Reveal"; flat: true; onClicked: page.keyVisible = !page.keyVisible }
+                        AppButton {
                             text: "Copy"; flat: true
                             onClicked: { clip.text = page.config ? page.config.api_key : ""; clip.selectAll(); clip.copy() }
                         }
-                        Button {
+                        AppButton {
                             text: "Regenerate"; flat: true
                             onClicked: regenDialog.open()
                         }
@@ -213,7 +218,7 @@ Item {
                     FormField {
                         Layout.fillWidth: true
                         label: "Port"; hint: "Local port for the OpenAI-compatible API."
-                        SpinBox {
+                        AppSpinBox {
                             id: portSpin
                             from: 1024; to: 65535; editable: true
                             value: 1235
@@ -227,7 +232,7 @@ Item {
                         Layout.fillWidth: true
                         label: "LAN access"
                         hint: "Warning: exposes loaded models to your network. The API key is still required. Off = loopback only."
-                        Switch {
+                        AppSwitch {
                             id: lanSwitch
                             onToggled: {
                                 page.formAllowLan = checked
@@ -246,7 +251,7 @@ Item {
                         Layout.fillWidth: true
                         label: "CORS origins"
                         hint: "Comma-separated origins, empty = CORS disabled (recommended)."
-                        TextField {
+                        AppTextField {
                             id: corsField
                             width: 320
                             onTextEdited: {
@@ -259,7 +264,7 @@ Item {
                         Layout.fillWidth: true
                         label: "Start automatically"
                         hint: "Start the API when OpenInfer Studio launches."
-                        Switch {
+                        AppSwitch {
                             id: autoSwitch
                             onToggled: {
                                 page.formAutostart = checked
@@ -268,9 +273,9 @@ Item {
                         }
                     }
                     RowLayout {
-                        Button {
+                        AppButton {
                             text: "Save configuration"
-                            highlighted: page.formDirty
+                            primary: page.formDirty
                             onClicked: page.api.put("/api/v1/server", {
                                 "port": page.formPort,
                                 "bind": page.formAllowLan ? "0.0.0.0" : "127.0.0.1",
@@ -333,7 +338,7 @@ Item {
                         Layout.fillWidth: true
                         label: "Enable HostIt"
                         hint: "When enabled, starting the public API also registers a HostIt route."
-                        Switch {
+                        AppSwitch {
                             id: hostitSwitch
                             onToggled: {
                                 page.hostitEnabled = checked
@@ -345,7 +350,7 @@ Item {
                         Layout.fillWidth: true
                         label: "Domain"
                         hint: "Port-only tunnel, or ask HostIt to assign a domain automatically."
-                        ComboBox {
+                        AppComboBox {
                             id: hostitDomainBox
                             model: [
                                 { "v": "", "label": "Port only (no domain)" },
@@ -385,7 +390,7 @@ Item {
                             elide: Text.ElideMiddle
                             Layout.fillWidth: true
                         }
-                        Button {
+                        AppButton {
                             text: "Copy"
                             flat: true
                             onClicked: { clip.text = page.publicUrl(); clip.selectAll(); clip.copy() }
@@ -400,9 +405,9 @@ Item {
                         font.pixelSize: AppTheme.fontSmall
                     }
                     RowLayout {
-                        Button {
+                        AppButton {
                             text: "Save + sync"
-                            highlighted: true
+                            primary: true
                             onClicked: page.api.put("/api/v1/hostit", {
                                 "enabled": page.hostitEnabled,
                                 "agent_url": page.hostitAgentURL,
@@ -417,7 +422,7 @@ Item {
                                 page.applyHostIt(data)
                             })
                         }
-                        Button {
+                        AppButton {
                             text: "Refresh status"
                             flat: true
                             onClicked: page.reloadHostIt()
@@ -426,7 +431,7 @@ Item {
                 }
             }
 
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "Connection example"
                 ScrollView {
@@ -447,7 +452,7 @@ Item {
                 }
             }
 
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 220
                 title: "Recent requests"

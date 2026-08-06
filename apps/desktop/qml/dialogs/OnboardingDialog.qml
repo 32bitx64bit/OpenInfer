@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import ".."
 import "../components"
 
-// First-run setup: welcome → install a runtime. Models are left to the user.
+// First-run setup: welcome → runtime → a clear next step toward first chat.
 Dialog {
     id: root
     property var api
@@ -20,11 +20,13 @@ Dialog {
     property string errorText: ""
     property real installProgress: -1
 
-    readonly property int stepCount: 2
+    readonly property int stepCount: 3
     readonly property bool hasRuntime: installed.length > 0
 
     signal finished()
     signal goChat()
+    signal goRuntimes()
+    signal goModels()
 
     title: ""
     modal: true
@@ -39,6 +41,7 @@ Dialog {
         border.color: AppTheme.border
         radius: AppTheme.radius
     }
+    Component.onCompleted: AppTheme.applyPalette(root)
 
     function openWizard() {
         root.step = 0
@@ -262,14 +265,14 @@ Dialog {
                     wrapMode: Text.WordWrap
                     color: AppTheme.textDim
                 }
-                Button {
+                AppButton {
                     text: root.hasRuntime ? "Runtime installed"
                         : (root.installing || root.checking ? "Working…" : "Install recommended build")
                     enabled: !root.hasRuntime && !root.installing && !root.checking
-                    highlighted: !root.hasRuntime
+                    primary: !root.hasRuntime
                     onClicked: root.installRecommended()
                 }
-                ProgressBar {
+                AppProgressBar {
                     Layout.fillWidth: true
                     visible: root.installing && root.installProgress >= 0
                     value: Math.max(0, root.installProgress)
@@ -291,12 +294,49 @@ Dialog {
                     font.pixelSize: AppTheme.fontSmall
                     wrapMode: Text.WordWrap
                 }
-                Button {
+                AppButton {
                     flat: true
                     text: "Advanced options on Runtimes page…"
                     onClicked: {
                         root.completeAndClose()
-                        if (root.stack) root.stack.currentIndex = 4
+                        root.goRuntimes()
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+
+            // Step 2 — Continue the first-model workflow without forcing it.
+            ColumnLayout {
+                spacing: AppTheme.gap
+                Label {
+                    Layout.fillWidth: true
+                    text: "Your runtime is ready. The next step is choosing a model to run locally."
+                    color: AppTheme.textDim
+                    wrapMode: Text.WordWrap
+                }
+                SectionCard {
+                    Layout.fillWidth: true
+                    title: "Find a model"
+                    subtitle: "Browse compatible GGUF models and start with a quantization that fits your hardware."
+                    AppButton {
+                        text: "Browse models"
+                        primary: true
+                        onClicked: {
+                            root.completeAndClose()
+                            root.goModels()
+                        }
+                    }
+                }
+                SectionCard {
+                    Layout.fillWidth: true
+                    title: "I already have models"
+                    subtitle: "Go straight to chat. You can import a GGUF or select a local model whenever you are ready."
+                    AppButton {
+                        text: "Open chat"
+                        onClicked: {
+                            root.completeAndClose()
+                            root.goChat()
+                        }
                     }
                 }
                 Item { Layout.fillHeight: true }
@@ -312,21 +352,21 @@ Dialog {
                 anchors.fill: parent
                 anchors.margins: 12
                 spacing: 8
-                Button {
+                AppButton {
                     flat: true
                     text: "Skip setup"
                     onClicked: root.skip()
                 }
                 Item { Layout.fillWidth: true }
-                Button {
+                AppButton {
                     flat: true
                     text: "Back"
                     enabled: root.step > 0
                     onClicked: root.step = Math.max(0, root.step - 1)
                 }
-                Button {
+                AppButton {
                     text: root.step >= root.stepCount - 1 ? "Finish" : "Next"
-                    highlighted: true
+                    primary: true
                     enabled: !(root.step === 1 && !root.hasRuntime && root.installing)
                     onClicked: {
                         if (root.step < root.stepCount - 1) {

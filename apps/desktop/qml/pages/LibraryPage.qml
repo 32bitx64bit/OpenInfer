@@ -53,6 +53,17 @@ Item {
     }
 
     signal openDetail(string modelId)
+    signal browseModels()
+
+    function openLoad(modelId) {
+        for (var i = 0; i < page.models.length; i++) {
+            if (page.models[i].id === modelId) {
+                loadDialog.openFor(page.models[i])
+                return
+            }
+        }
+        page.reload()
+    }
 
     function reload() {
         api.get("/api/v1/models", function(st, data) {
@@ -124,15 +135,21 @@ Item {
             Layout.margins: AppTheme.pad
             spacing: AppTheme.gap
 
+            PageHeader {
+                title: "My library"
+                subtitle: "Manage local models, load them with safe defaults, or open advanced configuration when you need it."
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
-                TextField {
+                SearchField {
                     Layout.fillWidth: true
                     placeholderText: "Filter by name, quantization, architecture…"
+                    searchLabel: "Filter local models"
                     onTextChanged: page.filter = text
                 }
-                Button {
+                AppButton {
                     text: page.scanning ? "Scanning…" : "Rescan"
                     enabled: !page.scanning
                     onClicked: {
@@ -143,7 +160,7 @@ Item {
                         })
                     }
                 }
-                Button {
+                AppButton {
                     text: "Import file…"
                     onClicked: importDialog.open()
                 }
@@ -162,8 +179,8 @@ Item {
                     icon: "▤"
                     title: "No local models"
                     hint: "Download a model from Discover, or import an existing GGUF file."
-                    actionText: "Rescan library"
-                    onActionTriggered: page.api.post("/api/v1/models/scan", {}, function() { page.reload() })
+                    actionText: "Browse models"
+                    onActionTriggered: page.browseModels()
                 }
 
                 delegate: Card {
@@ -256,33 +273,34 @@ Item {
                                 color: AppTheme.stateColor(page.instances[modelData.id] ? page.instances[modelData.id].state : "")
                                 font.pixelSize: AppTheme.fontSmall
                             }
-                            Button {
+                            AppButton {
                                 visible: page.instances[modelData.id] !== undefined
                                 text: "Details"
                                 flat: true
                                 onClicked: page.openDetail(modelData.id)
                             }
-                            Button {
+                            AppButton {
                                 visible: page.instances[modelData.id] === undefined
                                     || ["failed", "crashed"].indexOf(page.instances[modelData.id].state) >= 0
                                 text: "Load…"
-                                highlighted: true
+                                primary: true
                                 onClicked: loadDialog.openFor(modelData)
                             }
-                            Button {
+                            AppButton {
                                 visible: page.instances[modelData.id] !== undefined
                                     && ["ready", "busy", "sleeping"].indexOf(page.instances[modelData.id].state) >= 0
                                 text: "Unload"
                                 onClicked: page.api.post("/api/v1/models/" + modelData.id + "/unload", {}, function() { page.reload() })
                             }
-                            Button {
+                            AppButton {
                                 visible: page.instances[modelData.id] !== undefined
                                     && ["failed", "crashed"].indexOf(page.instances[modelData.id].state) >= 0
                                 text: "Diagnostics"
                                 onClicked: failureDialog.openFor(modelData.id)
                             }
-                            ToolButton {
-                                text: "⋯"
+                            IconButton {
+                                iconText: "⋯"
+                                description: "Model actions"
                                 onClicked: modelMenu.popup()
                                 Menu {
                                     id: modelMenu
@@ -327,6 +345,7 @@ Item {
             width: 400
             height: page.height
             interactive: false
+            background: Rectangle { color: AppTheme.bg; border.color: AppTheme.border }
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: AppTheme.pad
@@ -341,7 +360,7 @@ Item {
                 FormField {
                     Layout.fillWidth: true
                     label: "Alias"; hint: "Display and API name."
-                    TextField {
+                    AppTextField {
                         width: parent.width
                         text: page.selected ? page.selected.alias : ""
                         onEditingFinished: page.api.patch("/api/v1/models/" + page.selected.id,
@@ -351,7 +370,7 @@ Item {
                 FormField {
                     Layout.fillWidth: true
                     label: "Notes"; hint: "Personal notes about this model."
-                    TextArea {
+                    AppTextArea {
                         width: parent.width
                         height: 80
                         text: page.selected ? page.selected.notes : ""
@@ -359,7 +378,7 @@ Item {
                             { "notes": text }, function() { page.reload() })
                     }
                 }
-                GroupBox {
+                AppGroupBox {
                     Layout.fillWidth: true
                     title: "Files"
                     Column {
@@ -379,7 +398,7 @@ Item {
                     }
                 }
                 Item { Layout.fillHeight: true }
-                Button {
+                AppButton {
                     text: "Close"
                     Layout.alignment: Qt.AlignRight
                     onClicked: detailDrawer.close()

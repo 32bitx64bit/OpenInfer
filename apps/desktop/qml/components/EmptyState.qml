@@ -35,9 +35,10 @@ ColumnLayout {
         Layout.maximumWidth: 360
         Layout.fillWidth: true
     }
-    Button {
+    AppButton {
         visible: root.actionText !== ""
         text: root.actionText
+        primary: true
         Layout.alignment: Qt.AlignHCenter
         onClicked: root.actionTriggered()
     }

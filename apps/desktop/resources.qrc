@@ -7,8 +7,23 @@
         <file>qml/services/Api.qml</file>
         <file>qml/services/Events.qml</file>
         <file>qml/components/NavButton.qml</file>
+        <file>qml/components/AppButton.qml</file>
+        <file>qml/components/AppCheckBox.qml</file>
+        <file>qml/components/AppComboBox.qml</file>
+        <file>qml/components/AppDialog.qml</file>
+        <file>qml/components/AppGroupBox.qml</file>
+        <file>qml/components/AppProgressBar.qml</file>
+        <file>qml/components/AppSlider.qml</file>
+        <file>qml/components/AppSpinBox.qml</file>
+        <file>qml/components/AppSwitch.qml</file>
+        <file>qml/components/AppTextArea.qml</file>
+        <file>qml/components/AppTextField.qml</file>
         <file>qml/components/Card.qml</file>
+        <file>qml/components/IconButton.qml</file>
         <file>qml/components/EmptyState.qml</file>
+        <file>qml/components/PageHeader.qml</file>
+        <file>qml/components/SearchField.qml</file>
+        <file>qml/components/SectionCard.qml</file>
         <file>qml/components/Tag.qml</file>
         <file>qml/components/ConfirmDialog.qml</file>
         <file>qml/components/FormField.qml</file>

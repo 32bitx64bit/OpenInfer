@@ -23,6 +23,14 @@ Dialog {
     width: Math.min(680, parent ? parent.width - 64 : 680)
     height: Math.min(720, parent ? parent.height - 48 : 720)
     anchors.centerIn: parent
+    padding: AppTheme.padSmall
+
+    background: Rectangle {
+        color: AppTheme.bg
+        border.color: AppTheme.border
+        radius: AppTheme.radius
+    }
+    Component.onCompleted: AppTheme.applyPalette(root)
 
     // Persisted expand/collapse state.
     Settings {
@@ -337,7 +345,7 @@ Dialog {
                                     font.weight: Font.DemiBold
                                 }
                             }
-                            ProgressBar {
+                            AppProgressBar {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 8
                                 from: 0; to: 1
@@ -383,7 +391,7 @@ Dialog {
                                     font.weight: Font.DemiBold
                                 }
                             }
-                            ProgressBar {
+                            AppProgressBar {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 8
                                 from: 0; to: 1
@@ -452,7 +460,7 @@ Dialog {
                     Layout.fillWidth: true
                     visible: root.presets.length > 0
                     Label { text: "Preset:"; color: AppTheme.textDim }
-                    ComboBox {
+                    AppComboBox {
                         Layout.fillWidth: true
                         model: root.presets
                         textRole: "name"
@@ -464,7 +472,7 @@ Dialog {
                     Layout.fillWidth: true
                     label: "Runtime"
                     hint: "llama.cpp build used for this model. Auto uses the pinned or preferred runtime."
-                    ComboBox {
+                    AppComboBox {
                         id: runtimeCombo
                         width: parent.width
                         model: root.runtimeChoices()
@@ -494,7 +502,7 @@ Dialog {
                         RowLayout {
                             width: parent.width
                             spacing: 12
-                            Slider {
+                            AppSlider {
                                 id: ctxSlider
                                 Layout.fillWidth: true
                                 from: 512
@@ -503,7 +511,7 @@ Dialog {
                                 value: root.settings.context_length
                                 onMoved: root.setSetting("context_length", Math.round(value))
                             }
-                            SpinBox {
+                            AppSpinBox {
                                 from: 512
                                 to: 1048576
                                 stepSize: 512
@@ -531,7 +539,7 @@ Dialog {
                         spacing: 4
                         Row {
                             spacing: 8
-                            ComboBox {
+                            AppComboBox {
                                 id: offloadCombo
                                 model: [
                                     { "text": "All layers", "value": "all" },
@@ -559,7 +567,7 @@ Dialog {
                             width: parent.width
                             spacing: 12
                             visible: root.settings.gpu_offload === "custom"
-                            Slider {
+                            AppSlider {
                                 Layout.fillWidth: true
                                 from: 0
                                 to: root.maxLayers()
@@ -567,7 +575,7 @@ Dialog {
                                 value: root.settings.gpu_layers
                                 onMoved: root.setSetting("gpu_layers", Math.round(value))
                             }
-                            SpinBox {
+                            AppSpinBox {
                                 from: 0
                                 to: root.maxLayers()
                                 editable: true
@@ -589,7 +597,7 @@ Dialog {
                     label: "CPU threads"
                     hint: "0 = automatic."
                     argName: "--threads"
-                    SpinBox {
+                    AppSpinBox {
                         from: 0; to: 1024; editable: true
                         value: root.settings.threads
                         onValueModified: root.setSetting("threads", value)
@@ -601,7 +609,7 @@ Dialog {
                     label: "Flash Attention"
                     hint: "Reduces KV-cache memory. Auto = enabled."
                     argName: "--flash-attn"
-                    ComboBox {
+                    AppComboBox {
                         model: ["auto", "on", "off"]
                         currentIndex: Math.max(0, model.indexOf(root.settings.flash_attention))
                         onActivated: function(i) { root.setSetting("flash_attention", model[i]) }
@@ -613,7 +621,7 @@ Dialog {
                     label: "Parallel slots"
                     hint: "Simultaneous requests. Each slot gets the full context length; KV memory = context × slots."
                     argName: "--parallel"
-                    SpinBox {
+                    AppSpinBox {
                         from: 0; to: 64; editable: true
                         value: root.settings.parallel
                         onValueModified: root.setSetting("parallel", value)
@@ -626,7 +634,7 @@ Dialog {
                     label: "Built-in MTP"
                     hint: "Enabled by default for this GGUF (NextN / Multi-Token Prediction heads). Uses --spec-type draft-mtp without a separate draft file. Turn off here if you prefer single-token decode."
                     argName: "--spec-type"
-                    Switch {
+                    AppSwitch {
                         checked: root.settings.spec_type === "draft-mtp" && !root.settings.draft_model
                         onToggled: {
                             if (checked) {
@@ -648,7 +656,7 @@ Dialog {
                           ? "Only detected speculative drafts (mtp- / gemma4-assistant / eagle3- / dflash- / dspark-). Turn off Settings → Filter draft model picker to choose any GGUF."
                           : "All library models (filter off). Prefer official sidecars / gemma4-assistant when available."
                     argName: "--model-draft"
-                    ComboBox {
+                    AppComboBox {
                         id: draftCombo
                         width: parent.width
                         model: root.draftChoices()
@@ -702,7 +710,7 @@ Dialog {
                     label: "Draft tokens (max)"
                     hint: "Max tokens drafted per step. 0 = runtime default (typically 3–16)."
                     argName: "--spec-draft-n-max"
-                    SpinBox {
+                    AppSpinBox {
                         from: 0; to: 64; editable: true
                         value: root.settings.draft_max || 0
                         onValueModified: root.setSetting("draft_max", value)
@@ -715,7 +723,7 @@ Dialog {
                     label: "Spec type"
                     hint: "llama.cpp --spec-type. Auto-selected from mtp-/eagle3-/dflash-/dspark- sidecars and draft architecture."
                     argName: "--spec-type"
-                    ComboBox {
+                    AppComboBox {
                         model: [
                             { "text": "draft-simple", "value": "draft-simple" },
                             { "text": "draft-eagle3", "value": "draft-eagle3" },
@@ -741,7 +749,7 @@ Dialog {
                     Layout.fillWidth: true
                     label: "Remember on success"
                     hint: "Save as this model's default after a successful load. Failed loads keep the previous default."
-                    Switch {
+                    AppSwitch {
                         checked: root.settings.save_on_success
                         onToggled: root.setSetting("save_on_success", checked)
                     }
@@ -769,7 +777,7 @@ Dialog {
                     label: "Jinja chat template"
                     hint: "Required by many multimodal (vision/audio) models. Enabled by default when a projector is paired."
                     argName: "--jinja"
-                    Switch {
+                    AppSwitch {
                         checked: !!root.settings.jinja
                         onToggled: root.setSetting("jinja", checked)
                     }
@@ -782,7 +790,7 @@ Dialog {
                     hint: "Disable GPU offload for the multimodal projector (saves VRAM)."
                     argName: "--no-mmproj-offload"
                     supported: !root.settings.no_mmproj
-                    Switch {
+                    AppSwitch {
                         enabled: !root.settings.no_mmproj
                         checked: !!root.settings.no_mmproj_offload
                         onToggled: root.setSetting("no_mmproj_offload", checked)
@@ -808,7 +816,7 @@ Dialog {
                               : "Only available when a multimodal projector is paired with this model."
                         argName: "--no-mmproj"
                         supported: root.hasProjector
-                        Switch {
+                        AppSwitch {
                             enabled: root.hasProjector
                             checked: !!root.settings.no_mmproj
                             onToggled: root.setSetting("no_mmproj", checked)
@@ -818,21 +826,21 @@ Dialog {
                         Layout.fillWidth: true
                         label: "Batch size"; argName: "--batch-size"
                         hint: "Prompt processing batch. 0 = runtime default."
-                        SpinBox { from: 0; to: 65536; editable: true; value: root.settings.batch_size
+                        AppSpinBox { from: 0; to: 65536; editable: true; value: root.settings.batch_size
                             onValueModified: root.setSetting("batch_size", value) }
                     }
                     FormField {
                         Layout.fillWidth: true
                         label: "Micro-batch size"; argName: "--ubatch-size"
                         hint: "Physical batch. 0 = runtime default."
-                        SpinBox { from: 0; to: 65536; editable: true; value: root.settings.ubatch_size
+                        AppSpinBox { from: 0; to: 65536; editable: true; value: root.settings.ubatch_size
                             onValueModified: root.setSetting("ubatch_size", value) }
                     }
                     FormField {
                         Layout.fillWidth: true
                         label: "KV cache type K"; argName: "--cache-type-k"
                         hint: "Quantizing the K cache saves memory."
-                        ComboBox { model: ["", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
+                        AppComboBox { model: ["", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
                             currentIndex: Math.max(0, model.indexOf(root.settings.cache_type_k))
                             onActivated: function(i) { root.setSetting("cache_type_k", model[i]) } }
                     }
@@ -840,7 +848,7 @@ Dialog {
                         Layout.fillWidth: true
                         label: "KV cache type V"; argName: "--cache-type-v"
                         hint: "Quantizing the V cache saves memory."
-                        ComboBox { model: ["", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
+                        AppComboBox { model: ["", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"]
                             currentIndex: Math.max(0, model.indexOf(root.settings.cache_type_v))
                             onActivated: function(i) { root.setSetting("cache_type_v", model[i]) } }
                     }
@@ -848,21 +856,21 @@ Dialog {
                         Layout.fillWidth: true
                         label: "Memory mapping"; argName: "--no-mmap"
                         hint: "Disable to load the whole model into RAM up front."
-                        Switch { checked: !root.settings.no_mmap
+                        AppSwitch { checked: !root.settings.no_mmap
                             onToggled: root.setSetting("no_mmap", !checked) }
                     }
                     FormField {
                         Layout.fillWidth: true
                         label: "Memory locking"; argName: "--mlock"
                         hint: "Keep the model resident (prevents swapping)."
-                        Switch { checked: root.settings.mlock
+                        AppSwitch { checked: root.settings.mlock
                             onToggled: root.setSetting("mlock", checked) }
                     }
                     FormField {
                         Layout.fillWidth: true
                         label: "Model alias"; argName: "--alias"
                         hint: "Name exposed through the API."
-                        TextField {
+                        AppTextField {
                             id: aliasField
                             width: 320
                             text: root.settings.alias
@@ -895,7 +903,7 @@ Dialog {
                         label: "Batch threads"
                         argName: "--threads-batch"
                         hint: "CPU threads for prompt / batch processing. 0 = same as --threads. Higher can speed prefills."
-                        SpinBox {
+                        AppSpinBox {
                             from: 0; to: 256; editable: true
                             value: root.settings.threads_batch || 0
                             onValueModified: root.setSetting("threads_batch", value)
@@ -906,7 +914,7 @@ Dialog {
                         label: "Continuous batching"
                         argName: "--cont-batching"
                         hint: "Dynamic batching across slots. Improves multi-request throughput; leave default for single-chat."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": "" },
                                 { "text": "on", "value": "on" },
@@ -931,7 +939,7 @@ Dialog {
                         label: "Cache reuse"
                         argName: "--cache-reuse"
                         hint: "Min chunk size (tokens) to reuse from the prompt cache via KV shifting. 0 = off / runtime default."
-                        SpinBox {
+                        AppSpinBox {
                             from: 0; to: 65536; editable: true
                             value: root.settings.cache_reuse || 0
                             onValueModified: root.setSetting("cache_reuse", value)
@@ -942,7 +950,7 @@ Dialog {
                         label: "Process priority"
                         argName: "--prio"
                         hint: "OS scheduling priority for the llama-server process."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": -2 },
                                 { "text": "low", "value": -1 },
@@ -967,7 +975,7 @@ Dialog {
                         label: "Work poll"
                         argName: "--poll"
                         hint: "CPU polling while waiting for work (0 = sleep, 50 = default, 100 = aggressive). Can cut latency at the cost of idle CPU."
-                        SpinBox {
+                        AppSpinBox {
                             from: -1; to: 100; editable: true
                             value: (root.settings.poll === undefined || root.settings.poll === null)
                                    ? -1 : root.settings.poll
@@ -986,7 +994,7 @@ Dialog {
                         label: "NUMA"
                         argName: "--numa"
                         hint: "NUMA placement on multi-socket CPUs. Most desktops leave this empty."
-                        ComboBox {
+                        AppComboBox {
                             model: ["", "distribute", "isolate", "numactl"]
                             currentIndex: Math.max(0, model.indexOf(root.settings.numa || ""))
                             onActivated: function(i) { root.setSetting("numa", model[i]) }
@@ -997,7 +1005,7 @@ Dialog {
                         label: "Fit to device memory"
                         argName: "--fit"
                         hint: "Auto-adjust unset args (context / layers) so the load fits VRAM."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": "" },
                                 { "text": "on", "value": "on" },
@@ -1018,7 +1026,7 @@ Dialog {
                         label: "KV cache offload"
                         argName: "--kv-offload"
                         hint: "Keep KV cache on GPU (on) or force it to system RAM (off). Off frees VRAM but is slower."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": "" },
                                 { "text": "on", "value": "on" },
@@ -1039,7 +1047,7 @@ Dialog {
                         label: "Op offload"
                         argName: "--op-offload"
                         hint: "Offload host tensor ops to the GPU device (default on). Rarely disable unless debugging."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": "" },
                                 { "text": "on", "value": "on" },
@@ -1060,7 +1068,7 @@ Dialog {
                         label: "Unified KV buffer"
                         argName: "--kv-unified"
                         hint: "Single KV buffer shared across sequences. Helps multi-slot / continuous batching."
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "default", "value": "" },
                                 { "text": "on", "value": "on" },
@@ -1081,7 +1089,7 @@ Dialog {
                         label: "Full SWA cache"
                         argName: "--swa-full"
                         hint: "Use a full-size sliding-window attention cache. More memory; can help some SWA models."
-                        Switch {
+                        AppSwitch {
                             checked: !!root.settings.swa_full
                             onToggled: root.setSetting("swa_full", checked)
                         }
@@ -1091,7 +1099,7 @@ Dialog {
                         label: "Keep MoE on CPU"
                         argName: "--cpu-moe"
                         hint: "Leave all Mixture-of-Experts weights in system RAM. Frees VRAM on MoE models."
-                        Switch {
+                        AppSwitch {
                             checked: !!root.settings.cpu_moe
                             onToggled: root.setSetting("cpu_moe", checked)
                         }
@@ -1101,7 +1109,7 @@ Dialog {
                         label: "MoE layers on CPU"
                         argName: "--n-cpu-moe"
                         hint: "Keep MoE weights of the first N layers on CPU. 0 = unset (use --cpu-moe for all)."
-                        SpinBox {
+                        AppSpinBox {
                             from: 0; to: 512; editable: true
                             value: root.settings.n_cpu_moe || 0
                             onValueModified: root.setSetting("n_cpu_moe", value)
@@ -1112,7 +1120,7 @@ Dialog {
                         label: "Main GPU"
                         argName: "--main-gpu"
                         hint: "Primary GPU index for single-GPU or row-split intermediate/KV. -1 = unset."
-                        SpinBox {
+                        AppSpinBox {
                             from: -1; to: 15; editable: true
                             value: (root.settings.main_gpu === undefined || root.settings.main_gpu === null)
                                    ? -1 : root.settings.main_gpu
@@ -1124,7 +1132,7 @@ Dialog {
                         label: "Devices"
                         argName: "--device"
                         hint: "Comma-separated device list for offload (e.g. Vulkan0,Vulkan1). Empty = all; none = no offload."
-                        TextField {
+                        AppTextField {
                             width: parent.width
                             text: root.settings.device || ""
                             placeholderText: "Vulkan0,Vulkan1"
@@ -1136,7 +1144,7 @@ Dialog {
                         label: "Split mode"
                         argName: "--split-mode"
                         hint: "How to split across GPUs: layer (pipelined), row, or tensor."
-                        ComboBox {
+                        AppComboBox {
                             model: ["", "none", "layer", "row", "tensor"]
                             currentIndex: Math.max(0, model.indexOf(root.settings.split_mode || ""))
                             onActivated: function(i) { root.setSetting("split_mode", model[i]) }
@@ -1147,7 +1155,7 @@ Dialog {
                         label: "Tensor split"
                         argName: "--tensor-split"
                         hint: "Per-GPU fractions, e.g. 3,1 for a 75/25 split."
-                        TextField {
+                        AppTextField {
                             width: parent.width
                             text: root.settings.tensor_split || ""
                             placeholderText: "3,1"
@@ -1159,7 +1167,7 @@ Dialog {
                         label: "Draft tokens (min)"
                         argName: "--spec-draft-n-min"
                         hint: "Minimum draft tokens per speculative step. 0 = runtime default."
-                        SpinBox {
+                        AppSpinBox {
                             from: 0; to: 64; editable: true
                             value: root.settings.draft_min || 0
                             onValueModified: root.setSetting("draft_min", value)
@@ -1170,7 +1178,7 @@ Dialog {
                         label: "Skip warmup"
                         argName: "--no-warmup"
                         hint: "Skip the empty warmup run at start. Faster load; first real request may be slower."
-                        Switch {
+                        AppSwitch {
                             checked: !!root.settings.no_warmup
                             onToggled: root.setSetting("no_warmup", checked)
                         }
@@ -1180,7 +1188,7 @@ Dialog {
                         Layout.fillWidth: true
                         label: "Raw llama.cpp arguments"
                         hint: "Space-separated flags supported by the selected runtime. Unsafe input is rejected."
-                        TextArea {
+                        AppTextArea {
                             width: parent.width
                             height: 72
                             text: root.settings.raw_args
@@ -1197,7 +1205,7 @@ Dialog {
                     }
                 }
 
-                GroupBox {
+                AppGroupBox {
                     Layout.fillWidth: true
                     title: "Generated command"
                     ColumnLayout {
@@ -1257,16 +1265,16 @@ Dialog {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Button {
+                    AppButton {
                         text: "Save preset…"
                         flat: true
                         onClicked: savePresetDialog.open()
                     }
                     Item { Layout.fillWidth: true }
-                    Button { text: "Cancel"; onClicked: root.close() }
-                    Button {
+                    AppButton { text: "Cancel"; onClicked: root.close() }
+                    AppButton {
                         text: "Load model"
-                        highlighted: true
+                        primary: true
                         enabled: root.estimate ? root.estimate.fits : true
                         ToolTip.visible: hovered && root.estimate && !root.estimate.fits
                         ToolTip.text: "Estimated to exceed available memory"
@@ -1294,10 +1302,15 @@ Dialog {
         modal: true
         anchors.centerIn: root.parent
         standardButtons: Dialog.Save | Dialog.Cancel
+        background: Rectangle {
+            color: AppTheme.bg
+            border.color: AppTheme.border
+            radius: AppTheme.radius
+        }
         Column {
             spacing: 8
-            TextField { id: presetNameField; placeholderText: "Preset name"; width: 280 }
-            CheckBox { id: presetDefault; text: "Make default" }
+            AppTextField { id: presetNameField; placeholderText: "Preset name"; width: 280 }
+            AppCheckBox { id: presetDefault; text: "Make default" }
         }
         onAccepted: {
             root.api.post("/api/v1/models/" + root.modelId + "/presets",

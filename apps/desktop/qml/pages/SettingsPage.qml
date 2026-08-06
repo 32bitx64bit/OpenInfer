@@ -68,21 +68,26 @@ Item {
             width: page.width - AppTheme.pad * 2
             spacing: AppTheme.gap * 1.5
 
-            RowLayout {
-                Label { text: "Settings"; font.pixelSize: AppTheme.fontHero; font.weight: Font.DemiBold; color: AppTheme.text }
-                Item { Layout.fillWidth: true }
-                Label { text: page.statusText; color: AppTheme.success }
+            PageHeader {
+                title: "Settings"
+                subtitle: "Control appearance, storage, connections, and advanced behavior."
+            }
+            Label {
+                visible: page.statusText !== ""
+                text: page.statusText
+                color: AppTheme.success
+                font.pixelSize: AppTheme.fontSmall
             }
 
             // Appearance
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "Appearance"
                 FormField {
                     width: parent.width
                     label: "Theme"
                     hint: "System follows the OS appearance."
-                    ComboBox {
+                    AppComboBox {
                         model: ["system", "dark", "light"]
                         currentIndex: Math.max(0, model.indexOf(page.settings["ui.theme"] || "system"))
                         onActivated: function(i) {
@@ -94,7 +99,7 @@ Item {
             }
 
             // Hardware
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "Hardware"
                 ColumnLayout {
@@ -133,13 +138,13 @@ Item {
                         wrapMode: Text.WordWrap
                     }
                     RowLayout {
-                        Button {
+                        AppButton {
                             text: "Refresh"
                             onClicked: page.api.get("/api/v1/hardware?refresh=1", function(st, data) {
                                 if (st === 200) { page.hardware = data.hardware; page.recommendation = data.recommendation }
                             })
                         }
-                        Button {
+                        AppButton {
                             text: "Copy report"
                             flat: true
                             onClicked: {
@@ -152,9 +157,9 @@ Item {
             }
 
             // Hugging Face token
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
-                title: "Hugging Face access"
+                title: "Connections · Hugging Face"
                 ColumnLayout {
                     width: parent.width
                     spacing: 6
@@ -166,19 +171,19 @@ Item {
                     }
                     RowLayout {
                         spacing: 8
-                        TextField {
+                        AppTextField {
                             id: tokenField
                             Layout.fillWidth: true
                             echoMode: TextInput.Password
                             placeholderText: page.hfConfigured ? "Token configured (enter to replace)" : "hf_…"
                         }
-                        Button {
+                        AppButton {
                             text: "Save token"
                             onClicked: page.api.put("/api/v1/hf/token", { "token": tokenField.text }, function(st) {
                                 if (st === 200) { page.hfConfigured = true; tokenField.text = "" }
                             })
                         }
-                        Button {
+                        AppButton {
                             text: "Remove"
                             visible: page.hfConfigured
                             onClicked: page.api.del("/api/v1/hf/token", function() { page.hfConfigured = false })
@@ -188,9 +193,9 @@ Item {
             }
 
             // Limits
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
-                title: "Behavior"
+                title: "Advanced behavior"
                 GridLayout {
                     columns: 2
                     width: parent.width
@@ -198,7 +203,7 @@ Item {
                     FormField {
                         label: "Concurrent downloads"
                         hint: "1–8 simultaneous downloads."
-                        SpinBox {
+                        AppSpinBox {
                             from: 1; to: 8
                             value: parseInt(page.settings["downloads.concurrency"] || "2")
                             onValueModified: page.setSetting("downloads.concurrency", value)
@@ -207,7 +212,7 @@ Item {
                     FormField {
                         label: "Max loaded models"
                         hint: "Simultaneously loaded models (1–32)."
-                        SpinBox {
+                        AppSpinBox {
                             from: 1; to: 32
                             value: parseInt(page.settings["instances.max_loaded"] || "8")
                             onValueModified: page.setSetting("instances.max_loaded", value)
@@ -216,7 +221,7 @@ Item {
                     FormField {
                         label: "Model startup timeout (s)"
                         hint: "How long to wait for a model to become ready."
-                        SpinBox {
+                        AppSpinBox {
                             from: 30; to: 3600; stepSize: 30
                             value: parseInt(page.settings["instances.startup_timeout_sec"] || "600")
                             onValueModified: page.setSetting("instances.startup_timeout_sec", value)
@@ -225,7 +230,7 @@ Item {
                     FormField {
                         label: "Stream responses"
                         hint: "Show tokens as they generate. Disable to wait for the full reply."
-                        Switch {
+                        AppSwitch {
                             checked: (page.settings["chat.streaming"] || "1") !== "0"
                             onToggled: page.setSetting("chat.streaming", checked ? "1" : "0")
                         }
@@ -233,7 +238,7 @@ Item {
                     FormField {
                         label: "Runtime update checks"
                         hint: "Check llama.cpp releases when opening the Runtimes page."
-                        Switch {
+                        AppSwitch {
                             checked: (page.settings["runtimes.update_checks"] || "1") === "1"
                             onToggled: page.setSetting("runtimes.update_checks", checked ? "1" : "0")
                         }
@@ -241,7 +246,7 @@ Item {
                     FormField {
                         label: "Filter draft model picker"
                         hint: "When on (default), the load dialog only lists detected speculative drafts (mtp-, gemma4-assistant, eagle3-, dflash-, dspark-, …). Turn off to pick any library GGUF as a draft-simple companion."
-                        Switch {
+                        AppSwitch {
                             checked: (page.settings["load.filter_incompatible_drafts"] || "1") !== "0"
                             onToggled: page.setSetting("load.filter_incompatible_drafts", checked ? "1" : "0")
                         }
@@ -250,14 +255,14 @@ Item {
             }
 
             // Experimental features (upstream llama.cpp audio is experimental)
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
-                title: "Experimental"
+                title: "Advanced · Experimental"
                 FormField {
                     width: parent.width
                     label: "Audio models"
                     hint: "Enable audio / multimodal-audio discovery, labeling, and chat attachments. llama.cpp audio input via libmtmd is experimental and may have reduced quality; use a recent multimodal-capable runtime."
-                    Switch {
+                    AppSwitch {
                         checked: (page.settings["experimental.audio_models"] || "0") === "1"
                         onToggled: page.setSetting("experimental.audio_models", checked ? "1" : "0")
                     }
@@ -265,9 +270,9 @@ Item {
             }
 
             // Model directories
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
-                title: "Model directories"
+                title: "Storage · Model directories"
                 ColumnLayout {
                     width: parent.width
                     spacing: 4
@@ -283,7 +288,7 @@ Item {
                                 elide: Text.ElideMiddle
                                 Layout.fillWidth: true
                             }
-                            Button {
+                            AppButton {
                                 visible: !modelData.managed
                                 text: "Remove"
                                 flat: true
@@ -292,8 +297,8 @@ Item {
                         }
                     }
                     RowLayout {
-                        TextField { id: dirField; Layout.fillWidth: true; placeholderText: "/path/to/models" }
-                        Button {
+                        AppTextField { id: dirField; Layout.fillWidth: true; placeholderText: "/path/to/models" }
+                        AppButton {
                             text: "Add directory"
                             onClicked: page.api.post("/api/v1/directories", { "path": dirField.text }, function(st, data) {
                                 if (st !== 201) page.statusText = (data && (data.detail || data.error)) || "failed"
@@ -306,7 +311,7 @@ Item {
             }
 
             // About / version (single source: internal/version/VERSION via API)
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "About"
                 ColumnLayout {
@@ -317,7 +322,7 @@ Item {
                         color: AppTheme.text
                         font.weight: Font.DemiBold
                     }
-                    Button {
+                    AppButton {
                         text: "Show setup guide"
                         flat: true
                         onClicked: page.replayOnboarding()

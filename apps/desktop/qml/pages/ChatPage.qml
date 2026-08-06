@@ -18,6 +18,9 @@ Item {
     property var library: []
     property var instances: []
     property bool generating: false
+    property bool loadingModel: false
+    property string waitingForModelId: ""
+    property var pendingGeneration: null
     property string streamingId: ""
     // Live text of the in-flight message; the bubble binds these directly.
     property string streamContent: ""
@@ -27,6 +30,29 @@ Item {
     property var expandedReasoning: ({})   // messageId → bool
     property string pendingAudioPath: ""
     property string pendingAudioName: ""
+    property bool conversationsLoading: false
+    property bool messagesLoading: false
+    property bool showArchived: false
+    signal openLibrary()
+    signal configureModel(string modelId)
+
+    function modelState() {
+        if (!page.currentConv) return "Choose a model"
+        var inst = page.instances.find(function(i) { return i.model_id === page.currentConv.model_id })
+        if (!inst) return "Not loaded"
+        if (inst.state === "ready" || inst.state === "busy") return "Ready"
+        return inst.state
+    }
+
+    Shortcut { sequence: "Ctrl+N"; onActivated: page.newConversation() }
+    Shortcut { sequence: "Ctrl+,"; onActivated: paramsDrawer.open() }
+    Shortcut {
+        sequence: "Escape"
+        enabled: page.generating
+        onActivated: {
+            if (page.currentConv) page.api.post("/api/v1/chat/" + page.currentConv.id + "/stop", {}, function() {})
+        }
+    }
 
     function isSpeculativeDraft(m) {
         if (!m) return false
@@ -83,7 +109,9 @@ Item {
     }
 
     function reload() {
-        api.get("/api/v1/chat", function(st, data) {
+        page.conversationsLoading = true
+        api.get("/api/v1/chat" + (page.showArchived ? "?archived=1" : ""), function(st, data) {
+            page.conversationsLoading = false
             if (st === 200) page.conversations = (data && data.conversations) || []
         })
         api.get("/api/v1/models", function(st, data) {
@@ -97,8 +125,11 @@ Item {
     function openConversation(c) {
         page.currentConv = c
         page.errorText = ""
+        page.messagesLoading = true
+        paramsDrawer.loadForConversation(c)
         page.syncModelSelector()
         api.get("/api/v1/chat/" + c.id + "/messages", function(st, data) {
+            page.messagesLoading = false
             if (st !== 200) return
             page.messages = (data && data.messages) || []
             page.chain = page.buildChain(page.latestLeaf())
@@ -152,13 +183,89 @@ Item {
     }
 
     function newConversation() {
-        api.post("/api/v1/chat", { "model_id": modelSelector.currentModelId(), "title": "" },
+        var mid = modelSelector.currentModelId()
+        if (!mid) {
+            page.errorText = "Choose a local model before creating a chat. Browse models to download or import one."
+            return
+        }
+        api.post("/api/v1/chat", { "model_id": mid, "title": "New chat" },
             function(st, data) {
                 if (st === 201) {
                     page.reload()
                     page.openConversation(data)
                 }
             })
+    }
+
+    function startGeneration(body) {
+        if (!page.currentConv) return
+        api.post("/api/v1/chat/" + page.currentConv.id + "/generate", body,
+            function(st, data) {
+                if (st !== 202) {
+                    page.generating = false
+                    page.errorText = (data && (data.detail || data.error)) || ("HTTP " + st)
+                } else {
+                    page.beginStreamingMessage(data.message_id)
+                }
+            })
+    }
+
+    function tryStartPendingGeneration() {
+        if (!page.pendingGeneration || !page.waitingForModelId) return
+        var ready = page.instances.some(function(i) {
+            return i.model_id === page.waitingForModelId && (i.state === "ready" || i.state === "busy")
+        })
+        var failed = page.instances.some(function(i) {
+            return i.model_id === page.waitingForModelId && ["failed", "crashed"].indexOf(i.state) >= 0
+        })
+        if (ready) {
+            var request = page.pendingGeneration
+            page.pendingGeneration = null
+            page.waitingForModelId = ""
+            page.loadingModel = false
+            modelWaitTimer.stop()
+            page.startGeneration(request)
+        } else if (failed) {
+            page.pendingGeneration = null
+            page.waitingForModelId = ""
+            page.loadingModel = false
+            page.generating = false
+            modelWaitTimer.stop()
+            page.errorText = "This model could not load. Open the Library to review diagnostics or configure a safer load."
+        }
+    }
+
+    function startWhenModelReady(body) {
+        if (!page.currentConv) return
+        // A generation starts only after the selected model is ready. The old
+        // parallel load/generate requests raced on slower hardware.
+        var mid = page.currentConv.model_id
+        if (!mid) {
+            page.generating = false
+            page.errorText = "Choose a model for this chat before generating."
+            return
+        }
+        var loaded = page.instances.some(function(i) {
+            return i.model_id === mid && (i.state === "ready" || i.state === "busy")
+        })
+        if (!loaded && mid) {
+            page.loadingModel = true
+            page.waitingForModelId = mid
+            page.pendingGeneration = body
+            modelWaitTimer.restart()
+            api.post("/api/v1/models/" + mid + "/load", {}, function(st, data) {
+                if (st !== 202) {
+                    page.generating = false
+                    page.loadingModel = false
+                    page.pendingGeneration = null
+                    page.waitingForModelId = ""
+                    modelWaitTimer.stop()
+                    page.errorText = "Auto-load failed: " + ((data && (data.detail || data.error)) || st)
+                }
+            })
+            return
+        }
+        page.startGeneration(body)
     }
 
     function send() {
@@ -172,21 +279,6 @@ Item {
         input.text = ""
         page.errorText = ""
         page.generating = true
-
-        // Ensure a model is loaded for this conversation.
-        var mid = page.currentConv.model_id
-        var loaded = page.instances.some(function(i) {
-            return i.model_id === mid && (i.state === "ready" || i.state === "busy")
-        })
-        if (!loaded && mid) {
-            // Automatic model loading with safe defaults.
-            api.post("/api/v1/models/" + mid + "/load", {}, function(st, data) {
-                if (st !== 202) {
-                    page.generating = false
-                    page.errorText = "Auto-load failed: " + ((data && (data.detail || data.error)) || st)
-                }
-            })
-        }
         var body = { "content": text, "params": paramsDrawer.params }
         if (hasAudio) {
             body.audio = {
@@ -196,15 +288,7 @@ Item {
             page.pendingAudioPath = ""
             page.pendingAudioName = ""
         }
-        api.post("/api/v1/chat/" + page.currentConv.id + "/generate", body,
-            function(st, data) {
-                if (st !== 202) {
-                    page.generating = false
-                    page.errorText = (data && (data.detail || data.error)) || ("HTTP " + st)
-                } else {
-                    page.beginStreamingMessage(data.message_id)
-                }
-            })
+        page.startWhenModelReady(body)
     }
 
     // Append the assistant message to the visible chain immediately so
@@ -231,16 +315,8 @@ Item {
     function regenerate(assistantMsg) {
         if (!page.currentConv || page.generating) return
         page.generating = true
-        api.post("/api/v1/chat/" + page.currentConv.id + "/generate",
-            { "parent_id": assistantMsg.parent_id, "content": "", "params": paramsDrawer.params },
-            function(st, data) {
-                if (st !== 202) {
-                    page.generating = false
-                    page.errorText = (data && (data.detail || data.error)) || ("HTTP " + st)
-                } else {
-                    page.beginStreamingMessage(data.message_id)
-                }
-            })
+        page.startWhenModelReady(
+            { "parent_id": assistantMsg.parent_id, "content": "", "params": paramsDrawer.params })
     }
 
     Connections {
@@ -273,6 +349,9 @@ Item {
             }
             if (name === "instance.state_changed") {
                 page.reload()
+                if (page.loadingModel) {
+                    modelWaitTimer.restart()
+                }
             }
         }
     }
@@ -291,6 +370,20 @@ Item {
         }
     }
     function reloadMessagesSoon() { reloadTimer.restart() }
+
+    Timer {
+        id: modelWaitTimer
+        interval: 650
+        repeat: true
+        onTriggered: {
+            page.api.get("/api/v1/instances", function(st, data) {
+                if (st === 200) {
+                    page.instances = (data && data.instances) || []
+                    page.tryStartPendingGeneration()
+                }
+            })
+        }
+    }
 
     // Follow-scroll while streaming (throttled).
     Timer {
@@ -315,12 +408,23 @@ Item {
                 spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
-                    Button { text: "+ New chat"; Layout.fillWidth: true; onClicked: page.newConversation() }
+                    AppButton { text: "+ New chat"; primary: true; Layout.fillWidth: true; onClicked: page.newConversation() }
                 }
-                TextField {
+                SearchField {
                     id: convSearch
                     Layout.fillWidth: true
                     placeholderText: "Search chats…"
+                    searchLabel: "Search chats"
+                }
+                AppButton {
+                    Layout.fillWidth: true
+                    text: page.showArchived ? "Show active chats" : "View archived chats"
+                    onClicked: {
+                        page.showArchived = !page.showArchived
+                        page.currentConv = null
+                        page.chain = []
+                        page.reload()
+                    }
                 }
                 ListView {
                     Layout.fillWidth: true
@@ -390,8 +494,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 8
                     spacing: 10
-                    Label { text: "Model:"; color: AppTheme.textDim }
-                    ComboBox {
+                    Label { text: "Model"; color: AppTheme.textDim }
+                    AppComboBox {
                         id: modelSelector
                         Layout.preferredWidth: 280
                         model: page.chatModels()
@@ -431,10 +535,26 @@ Item {
                             }
                         }
                     }
-                    Button {
-                        text: "Parameters"
-                        flat: true
+                    Tag {
+                        text: page.loadingModel ? "Loading…" : page.modelState()
+                        tone: page.loadingModel ? AppTheme.info
+                            : page.modelState() === "Ready" ? AppTheme.success : AppTheme.warning
+                    }
+                    AppButton {
+                        text: "Configure"
                         onClicked: paramsDrawer.open()
+                    }
+                    AppButton {
+                        text: "System prompt"
+                        enabled: page.currentConv !== null
+                        onClicked: systemPromptDialog.openFor(page.currentConv)
+                    }
+                    AppButton {
+                        visible: page.currentConv !== null && page.modelState() !== "Ready"
+                        text: "Model settings"
+                        onClicked: {
+                            if (page.currentConv) page.configureModel(page.currentConv.model_id)
+                        }
                     }
                     Item { Layout.fillWidth: true }
                     Label {
@@ -465,10 +585,14 @@ Item {
                     visible: page.chain.length === 0
                     anchors.centerIn: parent
                     icon: "◎"
-                    title: page.currentConv ? "Start the conversation" : "Select or create a chat"
-                    hint: "Pick a model, type below, and press Enter."
-                    actionText: page.currentConv ? "" : "New chat"
-                    onActionTriggered: page.newConversation()
+                    title: page.messagesLoading ? "Opening conversation…" : page.currentConv ? "Start the conversation" : "Select or create a chat"
+                    hint: page.currentConv ? "Your selected model will load when you send the first message."
+                        : "Create a chat with a local model, or browse models to get started."
+                    actionText: page.currentConv ? "" : (page.chatModels().length ? "New chat" : "Browse models")
+                    onActionTriggered: {
+                        if (page.chatModels().length) page.newConversation()
+                        else page.openLibrary()
+                    }
                 }
 
                 delegate: ColumnLayout {
@@ -499,18 +623,18 @@ Item {
                             MouseArea { anchors.fill: parent; onClicked: branchSheet.openFor(modelData) }
                         }
                         Item { Layout.fillWidth: true }
-                        Button {
-                            flat: true; text: "Copy"; font.pixelSize: AppTheme.fontSmall
+                        AppButton {
+                            flat: true; text: "Copy"
                             onClicked: { copyArea.text = modelData.content; copyArea.selectAll(); copyArea.copy() }
                         }
-                        Button {
+                        AppButton {
                             flat: true; visible: modelData.role === "assistant"
-                            text: "Regenerate"; font.pixelSize: AppTheme.fontSmall
+                            text: "Regenerate"
                             onClicked: page.regenerate(modelData)
                         }
-                        Button {
+                        AppButton {
                             flat: true; visible: modelData.role === "user"
-                            text: "Edit"; font.pixelSize: AppTheme.fontSmall
+                            text: "Edit"
                             onClicked: { editDialog.targetMsg = modelData; editDialog.open() }
                         }
                     }
@@ -667,7 +791,7 @@ Item {
                         color: AppTheme.danger
                         wrapMode: Text.WordWrap
                     }
-                    Button { text: "Clear"; flat: true; onClicked: page.errorText = "" }
+                    AppButton { text: "Clear"; flat: true; onClicked: page.errorText = "" }
                 }
             }
 
@@ -699,7 +823,7 @@ Item {
                             elide: Text.ElideMiddle
                             font.pixelSize: AppTheme.fontSmall
                         }
-                        Button {
+                        AppButton {
                             text: "Remove"
                             flat: true
                             onClicked: { page.pendingAudioPath = ""; page.pendingAudioName = "" }
@@ -709,7 +833,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
 
-                        Button {
+                        AppButton {
                             visible: page.canAttachAudio()
                             Layout.alignment: Qt.AlignBottom
                             text: "Audio"
@@ -742,7 +866,7 @@ Item {
                             flickableDirection: Flickable.VerticalFlick
                             interactive: contentHeight > height + 1
 
-                            TextArea.flickable: TextArea {
+                            TextArea.flickable: AppTextArea {
                                 id: input
                                 enabled: page.currentConv !== null
                                 wrapMode: TextArea.Wrap
@@ -783,19 +907,20 @@ Item {
                             }
                         }
 
-                        Button {
+                        AppButton {
                             visible: !page.generating
                             Layout.alignment: Qt.AlignBottom
                             text: "Send"
-                            highlighted: true
+                            primary: true
                             enabled: page.currentConv !== null
                                      && (input.text.trim() !== "" || page.pendingAudioPath !== "")
                             onClicked: page.send()
                         }
-                        Button {
+                        AppButton {
                             visible: page.generating
                             Layout.alignment: Qt.AlignBottom
                             text: "Stop"
+                            danger: true
                             onClicked: {
                                 if (page.currentConv)
                                     page.api.post("/api/v1/chat/" + page.currentConv.id + "/stop", {}, function() {})
@@ -830,11 +955,27 @@ Item {
         edge: Qt.RightEdge
         width: 340
         height: page.height
+        background: Rectangle { color: AppTheme.bg; border.color: AppTheme.border }
 
         property var params: ({
             "temperature": 0.7, "top_p": 0.95, "top_k": 40, "min_p": 0.05,
             "repeat_penalty": 1.1, "max_tokens": 2048
         })
+
+        function loadForConversation(conversation) {
+            var defaults = {
+                "temperature": 0.7, "top_p": 0.95, "top_k": 40, "min_p": 0.05,
+                "repeat_penalty": 1.1, "max_tokens": 2048
+            }
+            var saved = conversation && conversation.params ? conversation.params : {}
+            params = Object.assign({}, defaults, saved)
+        }
+        function updateParam(key, value) {
+            var next = Object.assign({}, params)
+            next[key] = value
+            params = next
+            saveParamsTimer.restart()
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -857,12 +998,12 @@ Item {
                     hint: modelData.hint
                     Row {
                         spacing: 8
-                        Slider {
+                        AppSlider {
                             id: slider
                             width: 180
                             from: modelData.min; to: modelData.max; stepSize: modelData.step
                             value: paramsDrawer.params[modelData.key]
-                            onMoved: paramsDrawer.params[modelData.key] = value
+                            onMoved: paramsDrawer.updateParam(modelData.key, value)
                         }
                         Label {
                             text: Number(slider.value).toFixed(modelData.step < 1 ? 2 : 0)
@@ -874,22 +1015,75 @@ Item {
             }
             Item { Layout.fillHeight: true }
             Label {
-                text: "Saved per chat when changed."
+                text: page.currentConv ? "Saved automatically for this chat." : "Create a chat to save parameters."
                 color: AppTheme.textFaint
                 font.pixelSize: AppTheme.fontSmall
             }
         }
     }
 
+    Timer {
+        id: saveParamsTimer
+        interval: 400
+        onTriggered: {
+            if (!page.currentConv) return
+            page.api.patch("/api/v1/chat/" + page.currentConv.id,
+                { "params": paramsDrawer.params }, function(st) {
+                    if (st === 200) page.currentConv.params = paramsDrawer.params
+                })
+        }
+    }
+
+    AppDialog {
+        id: systemPromptDialog
+        property var targetConv: null
+        title: "System prompt"
+        modal: true
+        anchors.centerIn: page
+        width: Math.min(560, page.width - 48)
+        standardButtons: Dialog.Save | Dialog.Cancel
+        function openFor(conversation) {
+            targetConv = conversation
+            systemPromptArea.text = conversation ? (conversation.system || "") : ""
+            open()
+        }
+        ColumnLayout {
+            width: parent.width
+            spacing: AppTheme.gapTight
+            Label {
+                Layout.fillWidth: true
+                text: "Set the behavior and context this chat should keep for every response."
+                color: AppTheme.textDim
+                wrapMode: Text.WordWrap
+            }
+            AppTextArea {
+                id: systemPromptArea
+                Layout.fillWidth: true
+                Layout.preferredHeight: 180
+                wrapMode: TextArea.Wrap
+                selectByMouse: true
+                placeholderText: "You are a helpful local assistant…"
+            }
+        }
+        onAccepted: if (targetConv) page.api.patch("/api/v1/chat/" + targetConv.id,
+            { "system": systemPromptArea.text }, function(st) {
+                if (st === 200) {
+                    targetConv.system = systemPromptArea.text
+                    page.currentConvChanged()
+                    page.reload()
+                }
+            })
+    }
+
     // Rename dialog
-    Dialog {
+    AppDialog {
         id: renameDialog
         property var targetConv: null
         title: "Rename chat"
         modal: true
         anchors.centerIn: page
         standardButtons: Dialog.Save | Dialog.Cancel
-        TextField { id: renameField; width: 300; text: renameDialog.targetConv ? renameDialog.targetConv.title : "" }
+        AppTextField { id: renameField; width: 300; text: renameDialog.targetConv ? renameDialog.targetConv.title : "" }
         onAccepted: if (targetConv) page.api.patch("/api/v1/chat/" + targetConv.id,
             { "title": renameField.text }, function() { page.reload() })
     }
@@ -909,7 +1103,7 @@ Item {
     }
 
     // Edit user message → branches the conversation.
-    Dialog {
+    AppDialog {
         id: editDialog
         property var targetMsg: null
         title: "Edit message (creates a branch)"
@@ -917,7 +1111,7 @@ Item {
         anchors.centerIn: page
         width: 480
         standardButtons: Dialog.Save | Dialog.Cancel
-        TextArea {
+        AppTextArea {
             id: editArea
             width: 440
             height: 160
@@ -925,19 +1119,15 @@ Item {
             wrapMode: TextArea.Wrap
         }
         onAccepted: if (targetMsg) {
-            page.api.post("/api/v1/chat/" + page.currentConv.id + "/generate",
-                { "parent_id": targetMsg.parent_id, "content": editArea.text, "params": paramsDrawer.params },
-                function(st, data) {
-                    if (st === 202) {
-                        page.generating = true
-                        page.beginStreamingMessage(data.message_id)
-                    }
-                })
+            if (page.generating) return
+            page.generating = true
+            page.startWhenModelReady(
+                { "parent_id": targetMsg.parent_id, "content": editArea.text, "params": paramsDrawer.params })
         }
     }
 
     // Branch picker
-    Dialog {
+    AppDialog {
         id: branchSheet
         property var branches: []
         function openFor(msg) {

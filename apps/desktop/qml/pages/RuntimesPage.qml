@@ -95,6 +95,11 @@ Item {
             width: page.width - AppTheme.pad * 2
             spacing: AppTheme.gap * 1.5
 
+            PageHeader {
+                title: "Runtimes"
+                subtitle: "Install and manage llama.cpp builds. Most people only need the recommended backend for this machine."
+            }
+
             // Recommendation banner
             Card {
                 Layout.fillWidth: true
@@ -122,7 +127,7 @@ Item {
             }
 
             // In-progress installations
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 visible: page.runtimeDownloads.length > 0 || page.pendingInstalls.length > 0
                 title: "Installations in progress"
@@ -147,7 +152,7 @@ Item {
                                     font.pixelSize: AppTheme.fontSmall
                                 }
                             }
-                            ProgressBar {
+                            AppProgressBar {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 8
                                 from: 0; to: 1
@@ -183,7 +188,7 @@ Item {
             }
 
             // Installed runtimes
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "Installed runtimes (" + page.installed.length + ")"
                 ColumnLayout {
@@ -234,7 +239,7 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 6
-                                    Button {
+                                    AppButton {
                                         text: "Health test"
                                         flat: true
                                         onClicked: page.api.post("/api/v1/runtimes/" + modelData.id + "/health", {},
@@ -244,19 +249,19 @@ Item {
                                                 page.reload()
                                             })
                                     }
-                                    Button {
+                                    AppButton {
                                         visible: !modelData.preferred
                                         text: "Set preferred"
                                         flat: true
                                         onClicked: page.api.post("/api/v1/runtimes/" + modelData.id + "/preferred", {},
                                             function() { page.reload() })
                                     }
-                                    Button {
+                                    AppButton {
                                         text: "Open directory"
                                         flat: true
                                         onClicked: Qt.openUrlExternally("file://" + modelData.install_dir)
                                     }
-                                    Button {
+                                    AppButton {
                                         text: "Capabilities"
                                         flat: true
                                         onClicked: {
@@ -271,7 +276,7 @@ Item {
                                         }
                                     }
                                     Item { Layout.fillWidth: true }
-                                    Button {
+                                    AppButton {
                                         text: "Remove"
                                         flat: true
                                         onClicked: {
@@ -288,7 +293,7 @@ Item {
             }
 
             // Release discovery
-            GroupBox {
+            AppGroupBox {
                 Layout.fillWidth: true
                 title: "Official llama.cpp releases"
                 ColumnLayout {
@@ -298,7 +303,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
                         Label { text: "Backend:"; color: AppTheme.textDim }
-                        ComboBox {
+                        AppComboBox {
                             model: [
                                 { "text": "Auto (recommended)", "value": "" },
                                 { "text": "CPU", "value": "cpu" },
@@ -311,14 +316,14 @@ Item {
                             textRole: "text"; valueRole: "value"
                             onActivated: function(i) { page.backendFilter = model[i].value }
                         }
-                        Button {
+                        AppButton {
                             text: page.checking ? "Checking…" : "Check for releases"
                             enabled: !page.checking
-                            highlighted: true
+                            primary: true
                             onClicked: page.checkReleases()
                         }
                         Item { Layout.fillWidth: true }
-                        Button {
+                        AppButton {
                             text: "Import custom build…"
                             onClicked: importRuntimeDialog.open()
                         }
@@ -361,7 +366,7 @@ Item {
                                         }
                                         Tag { text: modelData.backend; tone: AppTheme.accent }
                                         Label { text: AppTheme.bytes(modelData.asset.size); color: AppTheme.textFaint; font.pixelSize: AppTheme.fontSmall }
-                                        Button {
+                                        AppButton {
                                             text: "Install"
                                             onClicked: page.api.post("/api/v1/runtimes/install", {
                                                 "tag": relCard.relTag, "asset": modelData.asset.name,
@@ -381,16 +386,15 @@ Item {
         }
     }
 
-    Dialog {
+    AppDialog {
         id: capsDialog
         property var caps: []
         property string versionOut: ""
         property string helpText: ""
         title: "Runtime capabilities"
-        modal: true
-        anchors.centerIn: page
         width: 520
         height: 420
+        standardButtons: Dialog.NoButton
         ColumnLayout {
             anchors.fill: parent
             Label { text: capsDialog.versionOut.split("\n")[0]; color: AppTheme.textDim }
@@ -408,7 +412,7 @@ Item {
                     font.pixelSize: AppTheme.fontSmall
                 }
             }
-            Button { text: "Close"; onClicked: capsDialog.close(); Layout.alignment: Qt.AlignRight }
+            AppButton { text: "Close"; onClicked: capsDialog.close(); Layout.alignment: Qt.AlignRight }
         }
     }
 

@@ -51,11 +51,9 @@ Item {
         anchors.margins: AppTheme.pad
         spacing: AppTheme.gap
 
-        Label {
-            text: "Download queue"
-            font.pixelSize: AppTheme.fontTitle
-            font.weight: Font.DemiBold
-            color: AppTheme.text
+        PageHeader {
+            title: "Activity"
+            subtitle: "Track model and runtime downloads. Completed models appear in your library automatically."
         }
 
         ListView {
@@ -105,7 +103,7 @@ Item {
                         }
                     }
 
-                    ProgressBar {
+                    AppProgressBar {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 8
                         from: 0; to: 1
@@ -168,22 +166,22 @@ Item {
                         Layout.fillWidth: true
                         spacing: 6
                         Item { Layout.fillWidth: true }
-                        Button {
+                        AppButton {
                             visible: modelData.state === "active"
                             text: "Pause"; flat: true
                             onClicked: page.api.post("/api/v1/downloads/" + modelData.id + "/pause", {}, function() { page.reload() })
                         }
-                        Button {
+                        AppButton {
                             visible: ["paused", "failed", "canceled"].indexOf(modelData.state) >= 0
                             text: modelData.state === "failed" ? "Retry" : "Resume"; flat: true
                             onClicked: page.api.post("/api/v1/downloads/" + modelData.id + "/resume", {}, function() { page.reload() })
                         }
-                        Button {
+                        AppButton {
                             visible: ["active", "queued", "paused"].indexOf(modelData.state) >= 0
                             text: "Cancel"; flat: true
                             onClicked: page.api.post("/api/v1/downloads/" + modelData.id + "/cancel", {}, function() { page.reload() })
                         }
-                        Button {
+                        AppButton {
                             text: "Remove"; flat: true
                             onClicked: page.api.del("/api/v1/downloads/" + modelData.id, function() { page.reload() })
                         }

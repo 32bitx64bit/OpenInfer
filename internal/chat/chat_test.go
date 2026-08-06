@@ -120,6 +120,25 @@ func TestParamsMerge(t *testing.T) {
 	}
 }
 
+func TestMergeGenParamsUsesSavedDefaultsAndRequestOverrides(t *testing.T) {
+	savedTemp := 0.35
+	savedMax := 512
+	requestTemp := 0.8
+	merged := mergeGenParams(
+		GenParams{Temperature: &savedTemp, MaxTokens: &savedMax, Stop: []string{"saved"}},
+		GenParams{Temperature: &requestTemp},
+	)
+	if merged.Temperature == nil || *merged.Temperature != requestTemp {
+		t.Fatalf("temperature = %v, want request override %v", merged.Temperature, requestTemp)
+	}
+	if merged.MaxTokens == nil || *merged.MaxTokens != savedMax {
+		t.Fatalf("max tokens = %v, want saved default %v", merged.MaxTokens, savedMax)
+	}
+	if len(merged.Stop) != 1 || merged.Stop[0] != "saved" {
+		t.Fatalf("stop = %v, want saved stop", merged.Stop)
+	}
+}
+
 func TestJSONSchemaParam(t *testing.T) {
 	body := map[string]any{}
 	applyParams(body, GenParams{JSONSchema: `{"type":"object"}`})

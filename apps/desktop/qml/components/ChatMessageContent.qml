@@ -97,10 +97,9 @@ ColumnLayout {
                             font.family: "monospace"
                         }
                         Item { Layout.fillWidth: true }
-                        Button {
+                        AppButton {
                             flat: true
                             text: "Copy"
-                            font.pixelSize: AppTheme.fontSmall
                             onClicked: {
                                 codeCopy.text = modelData.text
                                 codeCopy.selectAll()

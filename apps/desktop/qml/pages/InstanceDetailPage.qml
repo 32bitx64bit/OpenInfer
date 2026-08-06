@@ -94,7 +94,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 10
-            Button { text: "← Back"; flat: true; onClicked: page.back() }
+            AppButton { text: "← Back"; flat: true; onClicked: page.back() }
             StatusDot { state: page.instance ? page.instance.state : "" }
             Label {
                 text: page.instance ? (page.instance.model_alias || page.instance.model_id) : page.modelId
@@ -229,15 +229,15 @@ Item {
                         font.weight: Font.DemiBold
                     }
                     Item { Layout.fillWidth: true }
-                    Button {
+                    AppButton {
                         text: page.follow ? "Following ▾" : "Follow"
                         flat: true
                         checkable: true
                         checked: page.follow
                         onClicked: page.follow = !page.follow
                     }
-                    Button { text: "Clear"; flat: true; onClicked: page.consoleLines = [] }
-                    Button { text: "Refresh"; flat: true; onClicked: page.reload() }
+                    AppButton { text: "Clear"; flat: true; onClicked: page.consoleLines = [] }
+                    AppButton { text: "Refresh"; flat: true; onClicked: page.reload() }
                 }
                 ListView {
                     id: consoleView

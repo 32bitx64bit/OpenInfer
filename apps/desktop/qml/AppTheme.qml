@@ -1,8 +1,8 @@
 pragma Singleton
 import QtQuick
 
-// OpenInfer Studio theme: original dark-first identity with light and system
-// modes. Restrained radii, dense information layout, strong focus contrast.
+// OpenInfer Studio theme. Semantic tokens keep a calm, focused interface
+// consistent across light, dark and system appearances.
 QtObject {
     // mode: "system" | "dark" | "light"
     property string mode: "system"
@@ -10,11 +10,14 @@ QtObject {
         || (mode === "system" && Qt.styleHints.colorScheme === Qt.ColorScheme.Dark)
 
     // Surfaces
-    readonly property color bg:        dark ? "#101418" : "#f4f6f8"
-    readonly property color bgAlt:     dark ? "#161b21" : "#e9edf1"
-    readonly property color surface:   dark ? "#1c232b" : "#ffffff"
-    readonly property color surfaceHi: dark ? "#242d37" : "#f0f3f6"
-    readonly property color border:    dark ? "#2e3944" : "#d3dbe2"
+    readonly property color bg:        dark ? "#0f1419" : "#f6f8fa"
+    readonly property color bgAlt:     dark ? "#151c23" : "#eef2f5"
+    readonly property color surface:   dark ? "#1a232c" : "#ffffff"
+    readonly property color surfaceHi: dark ? "#25313c" : "#f1f5f7"
+    readonly property color surfaceHover: dark ? "#202b35" : "#e8f0f1"
+    readonly property color surfaceSelected: dark ? "#173a38" : "#dff3ef"
+    readonly property color border:    dark ? "#2d3a46" : "#d5dfe4"
+    readonly property color borderFocus: dark ? "#4dd8c8" : "#0d8a7d"
     readonly property color overlay:   dark ? "#cc000000" : "#66000000"
 
     // Text
@@ -34,15 +37,19 @@ QtObject {
     readonly property color info:      dark ? "#6aa8e0" : "#2266aa"
 
     // Metrics
-    readonly property int radius: 8
-    readonly property int radiusSmall: 5
+    readonly property int radius: 10
+    readonly property int radiusSmall: 6
+    readonly property int gapTight: 8
     readonly property int gap: 12
-    readonly property int pad: 16
+    readonly property int gapLoose: 20
+    readonly property int padSmall: 12
+    readonly property int pad: 18
+    readonly property int padLarge: 28
 
     readonly property int fontBody: 13
     readonly property int fontSmall: 11
     readonly property int fontTitle: 16
-    readonly property int fontHero: 20
+    readonly property int fontHero: 22
 
     function stateColor(state) {
         switch (state) {
@@ -64,5 +71,31 @@ QtObject {
 
     function tokensPerSec(v) {
         return v ? v.toFixed(1) + " tok/s" : "—"
+    }
+
+    // Apply Fusion palette so stock controls inherit the app theme.
+    function applyPalette(target) {
+        if (!target || !target.palette)
+            return
+        target.palette.window = bg
+        target.palette.windowText = text
+        target.palette.base = surface
+        target.palette.alternateBase = bgAlt
+        target.palette.text = text
+        target.palette.button = surfaceHi
+        target.palette.buttonText = text
+        target.palette.brightText = text
+        target.palette.highlight = accent
+        target.palette.highlightedText = onAccent
+        target.palette.light = surfaceHi
+        target.palette.mid = border
+        target.palette.midlight = surface
+        target.palette.dark = border
+        target.palette.shadow = overlay
+        target.palette.link = accent
+        target.palette.linkVisited = accentHi
+        target.palette.placeholderText = textFaint
+        target.palette.toolTipBase = surfaceHi
+        target.palette.toolTipText = text
     }
 }

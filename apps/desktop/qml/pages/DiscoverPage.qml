@@ -19,8 +19,10 @@ Item {
     property var detailModalities: []
     property string detailMTP: ""
     property bool withVision: true
+    property bool showFilePaths: false
     property bool detailLoading: false
     property bool hasToken: false
+    signal downloadQueued(string label)
 
     function modalityLabel(mods) {
         if (!mods || mods.length === 0) return ""
@@ -85,6 +87,7 @@ Item {
         page.detailModalities = []
         page.detailMTP = ""
         page.withVision = true
+        page.showFilePaths = false
         detailDialog.open()
         api.get("/api/v1/hf/repo/" + repoId, function(st, data) {
             page.detailLoading = false
@@ -123,6 +126,8 @@ Item {
         }, function(st, data) {
             if (st !== 201)
                 page.searchError = (data && (data.detail || data.error)) || "download failed"
+            else
+                page.downloadQueued((page.detail ? page.detail.id : "Model") + " · " + group.label)
         })
         detailDialog.close()
     }
@@ -132,16 +137,22 @@ Item {
         anchors.margins: AppTheme.pad
         spacing: AppTheme.gap
 
+        PageHeader {
+            title: "Browse models"
+            subtitle: "Find GGUF models on Hugging Face. Start with a quantization that fits your hardware, then reveal advanced files only when needed."
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            TextField {
+            SearchField {
                 id: searchField
                 Layout.fillWidth: true
                 placeholderText: "Search Hugging Face for GGUF models…"
+                searchLabel: "Search Hugging Face models"
                 onAccepted: page.search()
             }
-            ComboBox {
+            AppComboBox {
                 id: sortCombo
                 model: [
                     { "text": "Relevance", "value": "" },
@@ -153,7 +164,7 @@ Item {
                 textRole: "text"
                 valueRole: "value"
             }
-            Button { text: "Search"; highlighted: true; onClicked: page.search() }
+            AppButton { text: "Search"; primary: true; onClicked: page.search() }
         }
 
         Label {
@@ -226,7 +237,7 @@ Item {
                             Text { text: (modelData.tags || []).slice(0, 5).join("  "); color: AppTheme.textFaint; font.pixelSize: AppTheme.fontSmall; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
                     }
-                    Button { text: "Details"; onClicked: page.openRepo(modelData.id) }
+                    AppButton { text: "Details"; onClicked: page.openRepo(modelData.id) }
                 }
             }
         }
@@ -275,15 +286,15 @@ Item {
                         tone: AppTheme.warning
                         Layout.minimumWidth: implicitWidth
                     }
-                    Button {
+                    AppButton {
                         text: "Open in browser"
                         flat: true
                         visible: page.detail !== null
                         onClicked: Qt.openUrlExternally("https://huggingface.co/" + page.detail.id)
                     }
-                    ToolButton {
-                        text: "✕"
-                        Accessible.name: "Close"
+                    IconButton {
+                        iconText: "✕"
+                        description: "Close"
                         onClicked: detailDialog.close()
                     }
                 }
@@ -321,7 +332,7 @@ Item {
                     Layout.fillWidth: true
                     visible: page.detailProjectors.length > 0
                     spacing: 8
-                    Switch {
+                    AppSwitch {
                         id: visionToggle
                         checked: page.withVision
                         onToggled: page.withVision = checked
@@ -345,7 +356,14 @@ Item {
                     Item { Layout.fillWidth: true }
                 }
 
-                GroupBox {
+                AppCheckBox {
+                    visible: page.detailGroups.length > 0
+                    text: "Show individual file paths"
+                    checked: page.showFilePaths
+                    onToggled: page.showFilePaths = checked
+                }
+
+                AppGroupBox {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     title: "Available files (" + page.detailGroups.length + " groups)"
@@ -399,7 +417,7 @@ Item {
                                     font.pixelSize: AppTheme.fontSmall
                                 }
                                 Repeater {
-                                    model: modelData.files
+                                    model: page.showFilePaths ? modelData.files : []
                                     Label {
                                         text: "  " + modelData.path + "  ·  " + AppTheme.bytes(modelData.size)
                                         color: AppTheme.textDim
@@ -412,9 +430,9 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Item { Layout.fillWidth: true }
-                                    Button {
+                                    AppButton {
                                         text: "Download"
-                                        highlighted: true
+                                        primary: true
                                         onClicked: page.downloadGroup(modelData)
                                     }
                                 }
@@ -423,7 +441,7 @@ Item {
                     }
                 }
 
-                GroupBox {
+                AppGroupBox {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 160
                     title: "Model card"
@@ -454,7 +472,7 @@ Item {
                     anchors.leftMargin: AppTheme.pad
                     anchors.rightMargin: AppTheme.pad
                     Item { Layout.fillWidth: true }
-                    Button {
+                    AppButton {
                         text: "Close"
                         onClicked: detailDialog.close()
                     }

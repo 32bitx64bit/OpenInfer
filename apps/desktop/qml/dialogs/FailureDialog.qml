@@ -21,6 +21,14 @@ Dialog {
     width: Math.min(720, parent ? parent.width - 64 : 720)
     height: Math.min(620, parent ? parent.height - 64 : 620)
     anchors.centerIn: parent
+    padding: AppTheme.pad
+
+    background: Rectangle {
+        color: AppTheme.bg
+        border.color: AppTheme.border
+        radius: AppTheme.radius
+    }
+    Component.onCompleted: AppTheme.applyPalette(root)
 
     function openFor(mid) {
         modelId = mid
@@ -73,7 +81,7 @@ Dialog {
             Label { text: root.report ? AppTheme.bytes(root.report.ram_total) + " total, " + AppTheme.bytes(root.report.ram_available) + " free" : ""; color: AppTheme.textDim; font.pixelSize: AppTheme.fontSmall }
         }
 
-        GroupBox {
+        AppGroupBox {
             Layout.fillWidth: true
             title: "Command"
             ScrollView {
@@ -92,7 +100,7 @@ Dialog {
             }
         }
 
-        GroupBox {
+        AppGroupBox {
             Layout.fillWidth: true
             Layout.fillHeight: true
             title: "Log (tail)"
@@ -112,7 +120,7 @@ Dialog {
 
         RowLayout {
             Layout.fillWidth: true
-            Button {
+            AppButton {
                 text: "Copy report"
                 onClicked: {
                     var r = root.report
@@ -125,10 +133,10 @@ Dialog {
                 TextEdit { id: reportCopy; visible: false }
             }
             Item { Layout.fillWidth: true }
-            Button { text: "Close"; onClicked: root.close() }
-            Button { text: "Try CPU fallback"; onClicked: { root.retryCpu(); root.close() } }
-            Button { text: "Retry safe settings"; onClicked: { root.retrySafe(); root.close() } }
-            Button { text: "Retry"; highlighted: true; onClicked: { root.retry(); root.close() } }
+            AppButton { text: "Close"; onClicked: root.close() }
+            AppButton { text: "Try CPU fallback"; onClicked: { root.retryCpu(); root.close() } }
+            AppButton { text: "Retry safe settings"; onClicked: { root.retrySafe(); root.close() } }
+            AppButton { text: "Retry"; primary: true; onClicked: { root.retry(); root.close() } }
         }
     }
 }

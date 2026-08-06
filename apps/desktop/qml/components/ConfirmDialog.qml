@@ -16,6 +16,24 @@ Dialog {
     anchors.centerIn: parent
     width: Math.min(480, parent ? parent.width - 64 : 480)
     standardButtons: Dialog.NoButton
+    padding: AppTheme.pad
+
+    background: Rectangle {
+        color: AppTheme.bg
+        border.color: AppTheme.border
+        radius: AppTheme.radius
+    }
+    Component.onCompleted: AppTheme.applyPalette(root)
+
+    header: Label {
+        text: root.title
+        color: AppTheme.text
+        font.pixelSize: AppTheme.fontTitle
+        font.weight: Font.DemiBold
+        leftPadding: AppTheme.pad
+        rightPadding: AppTheme.pad
+        topPadding: AppTheme.pad
+    }
 
     Column {
         width: parent.width
@@ -39,17 +57,12 @@ Dialog {
         Row {
             spacing: 8
             anchors.right: parent.right
-            Button { text: "Cancel"; onClicked: root.close() }
-            Button {
+            AppButton { text: "Cancel"; onClicked: root.close() }
+            AppButton {
                 text: root.confirmText
-                highlighted: !root.destructive
+                primary: !root.destructive
+                danger: root.destructive
                 onClicked: { root.confirmed(); root.close() }
-                palette.buttonText: root.destructive ? "white" : AppTheme.onAccent
-                background: Rectangle {
-                    radius: AppTheme.radiusSmall
-                    color: root.destructive ? AppTheme.danger
-                         : parent.down ? AppTheme.accentHi : AppTheme.accent
-                }
             }
         }
     }
