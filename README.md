@@ -5,7 +5,7 @@ locally with llama.cpp. Search Hugging Face, manage llama.cpp builds, load
 models with explicit engine settings, chat with streaming, and serve loaded
 models through a local OpenAI-compatible API.
 
-**Status:** 1.2.0. Discover → download → load → chat → serve works end to end.
+**Status:** 1.3.0. Discover → download → load → chat → serve works end to end.
 See *Known limitations* below.
 
 ## Platforms
