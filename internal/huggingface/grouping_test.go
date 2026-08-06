@@ -13,10 +13,38 @@ func TestQuantOf(t *testing.T) {
 		"model-F16.gguf":                   "F16",
 		"model.gguf":                       "",
 		"model-Q4_K_M-00001-of-00002.gguf": "Q4_K_M",
+		// Requantized uploads keep a leftover .f16.gguf fragment before the real quant.
+		"Q4_K_M/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q4_K_M.gguf": "Q4_K_M",
+		"Q2_K/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q2_K.gguf":     "Q2_K",
+		"Q8_0/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q8_0.gguf":     "Q8_0",
+		// Quant only in the parent folder.
+		"Q5_K_M/model.gguf": "Q5_K_M",
+		"IQ4_XS/weights.gguf": "IQ4_XS",
 	}
 	for in, want := range cases {
 		if got := quantOf(in); got != want {
 			t.Errorf("quantOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGroupFilesInstellaStyleRequant(t *testing.T) {
+	files := []FileEntry{
+		{Path: "Q2_K/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q2_K.gguf", Size: 100},
+		{Path: "Q4_K_M/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q4_K_M.gguf", Size: 200},
+		{Path: "Q8_0/amd.Instella-MoE-16B-A3B-Think.f16.gguf.Q8_0.gguf", Size: 300},
+	}
+	groups, _ := GroupFiles(files)
+	if len(groups) != 3 {
+		t.Fatalf("want 3 groups, got %d: %v", len(groups), labels(groups))
+	}
+	want := []string{"Q2_K", "Q4_K_M", "Q8_0"}
+	for i, q := range want {
+		if groups[i].Quant != q || groups[i].Label != q {
+			t.Errorf("group %d = quant=%q label=%q, want %q", i, groups[i].Quant, groups[i].Label, q)
+		}
+		if groups[i].Quant == "F16" || groups[i].Label == "GGUF" {
+			t.Errorf("must not collapse requantized files to F16/GGUF: %+v", groups[i])
 		}
 	}
 }

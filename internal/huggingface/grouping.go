@@ -62,12 +62,32 @@ func classifyFile(path string) FileKind {
 }
 
 // quantOf extracts the quantization token from a filename.
+// Prefer the rightmost match in the basename so names like
+// "model.f16.gguf.Q4_K_M.gguf" (common for requantized F16 uploads)
+// resolve to Q4_K_M rather than the leftover F16 fragment. When the
+// basename has no token, fall back to a parent directory that is itself
+// a known quant label (e.g. Q4_K_M/model.gguf).
 func quantOf(path string) string {
-	m := quantRe.FindStringSubmatch(path)
-	if len(m) < 2 {
-		return ""
+	base := path
+	dir := ""
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		dir = base[:i]
+		base = base[i+1:]
 	}
-	return strings.ToUpper(m[1])
+	if m := quantRe.FindAllStringSubmatch(base, -1); len(m) > 0 {
+		return strings.ToUpper(m[len(m)-1][1])
+	}
+	if dir != "" {
+		folder := dir
+		if i := strings.LastIndex(folder, "/"); i >= 0 {
+			folder = folder[i+1:]
+		}
+		folder = strings.ToUpper(folder)
+		if _, ok := quantRanks[folder]; ok {
+			return folder
+		}
+	}
+	return ""
 }
 
 // GroupFiles organizes repository files into logical download units:
